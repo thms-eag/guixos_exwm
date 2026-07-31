@@ -13,11 +13,11 @@
   (map specification->package
        '(
          ;; --- Outils Système, IA et Web ---
-         "sshfs" "syncthing" "curl" "ncdu" "git" "xdg-utils"
+         "sshfs" "syncthing" "curl" "git" "xdg-utils"
 	 "desktop-file-utils" "ripgrep" "isync" "notmuch" "msmtp"
 	 "gnupg" "password-store" "pinentry-tty" "pinentry-emacs"
 	 "xrdb" "xauth" "dbus" "light" "hydroxide" "xdg-desktop-portal"
-         "icecat" "yt-dlp" "toxic"
+         "icecat" "yt-dlp"
 	 
          ;; --- Bureautique et Média ---
          "ghostscript" "mupdf" "poppler" "imagemagick"
@@ -25,10 +25,10 @@
          "vorbis-tools" "mpg321" "mpv" "alsa-utils"
 	 "hunspell" "hunspell-dict-fr-toutesvariantes"
          "font-dejavu" "font-gnu-unifont" "libreoffice"
-	 "ledger"
+	 "ledger" "graphviz"
          
          ;; --- Emacs ---
-	 "emacs" "emacs-exwm" "emacs-desktop-environment" "emacs-xelb"
+	 "emacs" "emacs-exwm" "emacs-xelb"
 	 "emacs-biblio" "emacs-citar-denote" "emacs-consult-notes"
 	 "emacs-consult-notmuch" "emacs-darkroom" "emacs-denote-explore"
 	 "emacs-denote-journal" "emacs-denote-org" "emacs-dictionary"
