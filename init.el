@@ -2763,7 +2763,8 @@ insérée au point plutôt qu'affichée."
    ["Cette configuration"
     ("c" "la carte des raccourcis"  usr-carte-raccourcis)
     ("t" "les touches matérielles"  usr-touches-materielles)
-    ("V" "vérifier les touches"     usr-touches-verifier)]])
+    ("V" "vérifier les touches"     usr-touches-verifier)
+    ("n" "diagnostic note vocale"   usr-note-vocale-diagnostic)]])
 
 (transient-define-prefix usr-menu ()
   "Menu principal de la session."
@@ -2804,33 +2805,38 @@ monté un partage, sans attendre le prochain sondage périodique."
 ;; L'enregistrement passe par un fichier WAV plutôt que par un tube vers
 ;; oggenc : le processus arecord est alors seul, donc réellement
 ;; interruptible, et il finalise l'en-tête WAV en recevant SIGINT.
+;;
+;; Toute panne doit être visible : arecord a une sentinelle qui signale une
+;; sortie anormale et affiche son journal. Sans elle, un échec immédiat de
+;; la capture serait parfaitement silencieux.
 
 (defvar usr-note-vocale-repertoire "~/Bureau/"
   "Répertoire où déposer les notes vocales (la base Denote).")
+
+(defvar usr-note-vocale-journal " *note-vocale*"
+  "Tampon recevant la sortie d'arecord et d'oggenc.")
 
 (defvar usr--note-vocale-processus nil)
 (defvar usr--note-vocale-wav nil)
 (defvar usr--note-vocale-ogg nil)
 (defvar usr--note-vocale-debut nil)
 (defvar usr--note-vocale-horloge nil)
+(defvar usr--note-vocale-arret-demande nil)
 (defvar usr--note-vocale-temoin " ")
 
 (or global-mode-string (setq global-mode-string '("")))
 (unless (memq 'usr--note-vocale-temoin global-mode-string)
   (setq global-mode-string (append global-mode-string '(usr--note-vocale-temoin))))
 
-(defun usr--note-vocale-chemin (titre extension)
-  "Chemin au format Denote pour TITRE avec EXTENSION."
+(defun usr--note-vocale-base (titre)
+  "Partie commune du nom de fichier, au format Denote, pour TITRE."
   (let ((limace (replace-regexp-in-string
                  "\\`-\\|-\\'" ""
                  (replace-regexp-in-string
                   "[^[:alnum:]]+" "-" (downcase titre)))))
-    (expand-file-name
-     (format "%s--%s__audio_note.%s"
-             (format-time-string "%Y%m%dT%H%M%S")
-             (if (string-empty-p limace) "note-vocale" limace)
-             extension)
-     usr-note-vocale-repertoire)))
+    (format "%s--%s__audio_note"
+            (format-time-string "%Y%m%dT%H%M%S")
+            (if (string-empty-p limace) "note-vocale" limace))))
 
 (defun usr--note-vocale-tic ()
   "Met à jour le témoin de durée dans la modeline."
@@ -2847,20 +2853,41 @@ monté un partage, sans attendre le prochain sondage périodique."
   (setq usr--note-vocale-temoin " ")
   (force-mode-line-update t))
 
+(defun usr--note-vocale-sentinelle (processus evenement)
+  "Signale une mort inattendue d'arecord et montre son journal."
+  (when (and (memq (process-status processus) '(exit signal))
+             (not usr--note-vocale-arret-demande))
+    (usr--note-vocale-temoin-effacer)
+    (setq usr--note-vocale-processus nil)
+    (message "Note vocale : la capture s'est arrêtée (%s) — voir %s"
+             (string-trim evenement) usr-note-vocale-journal)
+    (when-let ((tampon (get-buffer usr-note-vocale-journal)))
+      (display-buffer tampon))))
+
 (defun usr--note-vocale-demarrer (titre)
   "Lance l'enregistrement d'une note vocale intitulée TITRE."
   (unless (executable-find "arecord")
     (user-error "arecord est introuvable (paquet alsa-utils)"))
   (make-directory (expand-file-name usr-note-vocale-repertoire) t)
-  (setq usr--note-vocale-wav (usr--note-vocale-chemin titre "wav")
-        usr--note-vocale-ogg (usr--note-vocale-chemin titre "ogg")
-        usr--note-vocale-debut (current-time)
-        usr--note-vocale-processus
+  ;; L'horodatage est calculé une seule fois : sinon le WAV et l'Ogg
+  ;; pourraient tomber sur deux secondes différentes.
+  (let ((base (usr--note-vocale-base titre)))
+    (setq usr--note-vocale-wav
+          (expand-file-name (concat base ".wav") usr-note-vocale-repertoire)
+          usr--note-vocale-ogg
+          (expand-file-name (concat base ".ogg") usr-note-vocale-repertoire)))
+  (setq usr--note-vocale-debut (current-time)
+        usr--note-vocale-arret-demande nil)
+  (with-current-buffer (get-buffer-create usr-note-vocale-journal)
+    (goto-char (point-max))
+    (insert (format "\n=== %s : arecord -f cd -t wav %s\n"
+                    (format-time-string "%H:%M:%S") usr--note-vocale-wav)))
+  (setq usr--note-vocale-processus
         (make-process
-         :name "note-vocale" :buffer " *note-vocale*" :noquery t
-         :command (list "arecord" "-f" "cd" "-t" "wav" usr--note-vocale-wav)))
-  (setq usr--note-vocale-horloge
-        (run-at-time 0 1 #'usr--note-vocale-tic))
+         :name "note-vocale" :buffer usr-note-vocale-journal :noquery t
+         :command (list "arecord" "-f" "cd" "-t" "wav" usr--note-vocale-wav)
+         :sentinel #'usr--note-vocale-sentinelle))
+  (setq usr--note-vocale-horloge (run-at-time 0 1 #'usr--note-vocale-tic))
   (message "Note vocale : enregistrement en cours (même touche pour arrêter)"))
 
 (defun usr--note-vocale-encoder (wav ogg)
@@ -2869,7 +2896,7 @@ monté un partage, sans attendre le prochain sondage périodique."
       (message "Note vocale conservée en WAV : %s (oggenc introuvable)"
                (file-name-nondirectory wav))
     (make-process
-     :name "note-vocale-encodage" :buffer " *note-vocale*" :noquery t
+     :name "note-vocale-encodage" :buffer usr-note-vocale-journal :noquery t
      :command (list "oggenc" "-Q" "-o" ogg wav)
      :sentinel
      (lambda (proc _evenement)
@@ -2882,6 +2909,7 @@ monté un partage, sans attendre le prochain sondage périodique."
 
 (defun usr--note-vocale-arreter ()
   "Arrête l'enregistrement en cours et lance la compression."
+  (setq usr--note-vocale-arret-demande t)
   (when (process-live-p usr--note-vocale-processus)
     ;; SIGINT plutôt que SIGKILL : arecord écrit alors la taille réelle
     ;; dans l'en-tête WAV avant de rendre la main.
@@ -2893,11 +2921,18 @@ monté un partage, sans attendre le prochain sondage périodique."
     (run-at-time
      "0.4 sec" nil
      (lambda ()
-       (if (or (not (file-exists-p wav)) (< (file-attribute-size
-                                             (file-attributes wav)) 1000))
-           (progn (ignore-errors (delete-file wav))
-                  (message "Note vocale : enregistrement trop court, rien conservé"))
-         (usr--note-vocale-encoder wav ogg))))))
+       (let ((taille (and (file-exists-p wav)
+                          (file-attribute-size (file-attributes wav)))))
+         (cond
+          ((null taille)
+           (message "Note vocale : aucun fichier écrit — voir %s"
+                    usr-note-vocale-journal)
+           (when-let ((tampon (get-buffer usr-note-vocale-journal)))
+             (display-buffer tampon)))
+          ((< taille 1000)
+           (ignore-errors (delete-file wav))
+           (message "Note vocale : enregistrement trop court, rien conservé"))
+          (t (usr--note-vocale-encoder wav ogg))))))))
 
 (defun usr-note-vocale (&optional titre)
   "Démarre ou arrête l'enregistrement d'une note vocale.
@@ -2910,6 +2945,88 @@ titre ; sinon la note s'appelle simplement « note vocale »."
   (if usr--note-vocale-processus
       (usr--note-vocale-arreter)
     (usr--note-vocale-demarrer (or titre "note vocale"))))
+
+;;;;; Auto-test ---------------------------------------------------------------
+
+(defun usr--note-vocale-sortie (&rest arguments)
+  "Sortie de la commande ARGUMENTS, ou message d'absence."
+  (if (not (executable-find (car arguments)))
+      (format "%s : absent" (car arguments))
+    (string-trim (with-output-to-string
+                   (with-current-buffer standard-output
+                     (apply #'call-process (car arguments) nil t nil
+                            (cdr arguments)))))))
+
+(defun usr-note-vocale-diagnostic ()
+  "Teste la chaîne complète d'enregistrement et rapporte ce qui bloque.
+Enregistre deux secondes pour de vrai, puis mesure le fichier obtenu."
+  (interactive)
+  (let* ((essai (expand-file-name "essai-micro.wav" temporary-file-directory))
+         (arecord (executable-find "arecord"))
+         (oggenc (executable-find "oggenc"))
+         (repertoire (expand-file-name usr-note-vocale-repertoire))
+         code taille)
+    (ignore-errors (delete-file essai))
+    (when arecord
+      (message "Diagnostic : enregistrement d'essai de 2 secondes…")
+      (setq code (call-process arecord nil (get-buffer-create usr-note-vocale-journal)
+                               nil "-f" "cd" "-d" "2" "-t" "wav" essai))
+      (setq taille (and (file-exists-p essai)
+                        (file-attribute-size (file-attributes essai)))))
+    (with-current-buffer (get-buffer-create "*diagnostic note vocale*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (org-mode)
+        (insert "#+TITLE: Diagnostic de la note vocale\n#+OPTIONS: toc:nil\n\n")
+
+        (insert "* Outils\n\n")
+        (insert (format "  - arecord : %s\n" (or arecord "ABSENT (paquet alsa-utils)")))
+        (insert (format "  - oggenc  : %s\n" (or oggenc "ABSENT (paquet vorbis-tools)")))
+
+        (insert "\n* Périphériques de capture\n\n")
+        (insert (format "%s\n" (usr--note-vocale-sortie "arecord" "-l")))
+
+        (insert "\n* Niveau du micro\n\n")
+        (let ((niveau (usr--note-vocale-sortie "amixer" "sget" "Capture")))
+          (insert (format "%s\n" niveau))
+          (when (string-match-p "\\[off\\]" niveau)
+            (insert "\n  ATTENTION : la capture est coupée. « amixer sset Capture cap »\n"
+                    "  puis « amixer sset Capture 80% » l'activent.\n")))
+
+        (insert "\n* Répertoire de destination\n\n")
+        (insert (format "  - %s : %s\n" repertoire
+                        (cond ((not (file-exists-p repertoire)) "INEXISTANT")
+                              ((not (file-writable-p repertoire)) "NON INSCRIPTIBLE")
+                              (t "inscriptible"))))
+
+        (insert "\n* Enregistrement d'essai (2 s)\n\n")
+        (cond
+         ((not arecord) (insert "  Impossible : arecord est absent.\n"))
+         ((not (eq code 0))
+          (insert (format "  ÉCHEC : arecord a rendu le code %s.\n" code)
+                  (format "  La sortie détaillée est dans %s.\n" usr-note-vocale-journal)))
+         ((null taille) (insert "  ÉCHEC : aucun fichier produit.\n"))
+         ((< taille 1000)
+          (insert (format "  ÉCHEC : fichier vide ou presque (%d octets).\n" taille)))
+         (t
+          (insert (format "  Réussi : %d octets en 2 secondes.\n" taille)
+                  "  La capture fonctionne ; si la touche ne déclenche rien,\n"
+                  "  c'est la touche qui est en cause, pas l'enregistrement.\n")))
+
+        (insert "\n* Touche\n\n")
+        (let* ((declaree (assoc "<XF86AudioMicMute>" usr--touches-declarees))
+               (prises (or (bound-and-true-p exwm-input--global-prefix-keys)
+                           (bound-and-true-p exwm-input--global-keys)))
+               (capturee (and prises (member (kbd "<XF86AudioMicMute>") prises) t)))
+          (insert (format "  - déclarée dans la configuration : %s\n"
+                          (if declaree "oui" "NON")))
+          (insert (format "  - capturée par EXWM : %s\n" (if capturee "oui" "NON")))
+          (insert "\n  Si le clavier n'a pas de touche micro, « s-SPC ? t » liste\n"
+                  "  les touches qu'il émet réellement, et « s-SPC o v » déclenche\n"
+                  "  l'enregistrement par le menu, sans passer par la touche.\n"))
+        (goto-char (point-min))))
+    (ignore-errors (delete-file essai))
+    (pop-to-buffer "*diagnostic note vocale*")))
 
 (defun usr--note-vocale-description ()
   "Libellé du menu, indiquant l'enregistrement en cours le cas échéant."
