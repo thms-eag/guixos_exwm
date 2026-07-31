@@ -98,11 +98,20 @@
                                     #:log-file (string-append (getenv "HOME") "/.local/var/log/hydroxide.log")))
                           (stop  #~(make-kill-destructor)))))
 
+   ;; Chemins absolus du dépôt : l'environnement de mcron n'hérite pas
+   ;; forcément du PATH du profil Home, et une commande introuvable échouerait
+   ;; en silence toutes les dix minutes.
    (simple-service 'mbsync-cron
                    home-mcron-service-type
                    (list
                     #~(job '(next-minute (range 0 60 10))
-                           "mbsync -a && notmuch new"
+                           (string-append
+                            #$(file-append (specification->package "isync")
+                                           "/bin/mbsync")
+                            " -a && "
+                            #$(file-append (specification->package "notmuch")
+                                           "/bin/notmuch")
+                            " new")
                            "mbsync-job")))
    
    (simple-service 'mes-variables-environnement
@@ -128,9 +137,13 @@
 		                     #~(execl "/run/current-system/profile/bin/sh" "sh" "-c"
 		                              "DISPLAY=:0 nohup /run/setuid-programs/slock >/dev/null 2>&1 & sleep 2 ; echo mem | /run/setuid-programs/sudo /run/current-system/profile/bin/tee /sys/power/state > /dev/null")))
 		    
+		    ;; Guix ne fournit que /bin/sh : /bin/true n'existe pas, et
+		    ;; l'activation D-Bus échouerait si elle était sollicitée.
 		    `(".local/share/dbus-1/services/org.gnu.Emacs.FileChooser.service"
-		      ,(plain-file "emacs-filechooser-dbus"
-		    		   "[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.emacs\nExec=/bin/true\n"))
+		      ,(mixed-text-file "emacs-filechooser-dbus"
+		    		   "[D-BUS Service]\nName=org.freedesktop.impl.portal.desktop.emacs\nExec="
+				   (file-append (specification->package "coreutils") "/bin/true")
+				   "\n"))
 
 		    `(".config/xdg-desktop-portal/portals.conf"
 		      ,(plain-file "portals.conf"
