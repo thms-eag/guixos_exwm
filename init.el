@@ -2728,20 +2728,25 @@ insérée au point plutôt qu'affichée."
     ("r" "redémarrer"           usr-redemarrer)
     ("z" "mettre en veille"     usr-veille)
     ("v" "verrouiller l'écran"  usr-ecran-verrouiller)]
-   ["Sécurité"
+   ["Sécurité & réseau"
     ("g" "déverrouiller GPG"    usr-gpg-deverrouiller)
-    ("G" "verrouiller GPG"      usr-gpg-verrouiller)]
-   ["Réseau & données"
+    ("G" "verrouiller GPG"      usr-gpg-verrouiller)
+    ("w" "sans-fil"             usr-reseau-basculer)
     ("m" "monter Club1"         usr-club1-monter)
     ("M" "démonter Club1"       usr-club1-demonter)
     ("s" "démarrer Syncthing"   usr-syncthing-demarrer)
     ("S" "arrêter Syncthing"    usr-syncthing-arreter)]
-   ["Matériel"
+   ["Son & affichage"
     ("+" "volume +"             usr-volume-monter    :transient t)
     ("-" "volume −"             usr-volume-baisser   :transient t)
     ("0" "couper le son"        usr-volume-couper    :transient t)
+    ("k" "couper le micro"      usr-micro-couper     :transient t)
     (">" "luminosité +"         usr-luminosite-monter  :transient t)
-    ("<" "luminosité −"         usr-luminosite-baisser :transient t)]
+    ("<" "luminosité −"         usr-luminosite-baisser :transient t)
+    ("b" "rétroéclairage clavier +" usr-clavier-retroeclairage-monter :transient t)
+    ("B" "rétroéclairage clavier −" usr-clavier-retroeclairage-baisser :transient t)
+    ("E" "écran externe"        usr-affichage-basculer)
+    ("T" "pavé tactile"         usr-pave-tactile-basculer)]
    ["Configuration"
     ("u" "mettre à jour (guix pull)" usr-guix-mettre-a-jour)
     ("c" "recharger la configuration" usr-configuration-recharger)
@@ -2760,7 +2765,8 @@ insérée au point plutôt qu'affichée."
     ("x" "une commande…"        helpful-command)
     ("v" "une variable…"        helpful-variable)]
    ["Cette configuration"
-    ("c" "la carte des raccourcis" usr-carte-raccourcis)]])
+    ("c" "la carte des raccourcis"  usr-carte-raccourcis)
+    ("t" "les touches matérielles"  usr-touches-materielles)]])
 
 (transient-define-prefix usr-menu ()
   "Menu principal de la session."
@@ -2783,31 +2789,224 @@ insérée au point plutôt qu'affichée."
     ("s" "Système"              usr-menu-systeme)
     ("?" "Aide"                 usr-menu-aide)]])
 
+;;;; --- Commandes liées au matériel ------------------------------------------
+
+(defun usr--binaire (nom)
+  "Retourne le chemin de NOM, ou nil en signalant son absence."
+  (or (executable-find nom)
+      (progn (message "« %s » n'est pas installé — ajoutez-le à home.scm" nom)
+             nil)))
+
+(defun usr-micro-couper ()
+  "Coupe ou rétablit le micro."
+  (interactive)
+  (when (usr--binaire "amixer")
+    (make-process
+     :name "micro" :buffer nil :noquery t
+     :command '("amixer" "sset" "Capture" "toggle")
+     :filter (lambda (_proc sortie)
+               (when (string-match "\\[\\(on\\|off\\)\\]" sortie)
+                 (message "Micro %s" (if (equal (match-string 1 sortie) "off")
+                                         "coupé" "actif")))))))
+
+(defun usr--clavier-led ()
+  "Nom de la LED de rétroéclairage du clavier sous /sys/class/leds, ou nil.
+Le nom varie selon le constructeur (asus::kbd_backlight,
+dell::kbd_backlight, tpacpi::kbd_backlight…), d'où la détection."
+  (car (seq-filter
+        (lambda (d) (string-match-p "kbd\\|keyboard" d))
+        (ignore-errors
+          (directory-files "/sys/class/leds" nil directory-files-no-dot-files-regexp)))))
+
+(defun usr--clavier-retroeclairage (delta)
+  "Ajuste le rétroéclairage du clavier de DELTA pour cent."
+  (let ((led (usr--clavier-led)))
+    (cond
+     ((not led) (message "Aucun rétroéclairage de clavier détecté"))
+     ((usr--binaire "light")
+      (start-process "kbd-light" nil "light"
+                     "-s" (concat "sysfs/leds/" led)
+                     (if (> delta 0) "-A" "-U")
+                     (number-to-string (abs delta)))))))
+
+(defun usr-clavier-retroeclairage-monter ()
+  "Augmente le rétroéclairage du clavier."
+  (interactive)
+  (usr--clavier-retroeclairage 10))
+
+(defun usr-clavier-retroeclairage-baisser ()
+  "Diminue le rétroéclairage du clavier."
+  (interactive)
+  (usr--clavier-retroeclairage -10))
+
+(defun usr-pave-tactile-basculer ()
+  "Active ou désactive le pavé tactile."
+  (interactive)
+  (when (usr--binaire "xinput")
+    (let* ((noms (split-string
+                  (shell-command-to-string "xinput list --name-only") "\n" t))
+           (pave (car (seq-filter
+                       (lambda (n) (string-match-p "\\(?:Touchpad\\|TouchPad\\|pavé\\)" n))
+                       noms))))
+      (if (not pave)
+          (message "Aucun pavé tactile trouvé dans la liste xinput")
+        (let* ((etat (shell-command-to-string
+                      (format "xinput list-props %s | grep 'Device Enabled'"
+                              (shell-quote-argument pave))))
+               (actif (string-match-p ":\\s-*1" etat)))
+          (start-process "xinput" nil "xinput"
+                         (if actif "disable" "enable") pave)
+          (message "Pavé tactile %s" (if actif "désactivé" "activé")))))))
+
+(defun usr-affichage-basculer ()
+  "Bascule l'écran externe : allumé à droite du principal, ou éteint."
+  (interactive)
+  (when (usr--binaire "xrandr")
+    (let* ((sortie (shell-command-to-string "xrandr --query"))
+           (principal (when (string-match "^\\([A-Za-z0-9-]+\\) connected primary" sortie)
+                        (match-string 1 sortie)))
+           (externe nil))
+      ;; Premier écran connecté qui n'est ni le principal ni l'écran interne.
+      (dolist (ligne (split-string sortie "\n" t))
+        (when (and (not externe)
+                   (string-match "^\\([A-Za-z0-9-]+\\) connected" ligne)
+                   (not (string-match-p "^eDP\\|^LVDS" ligne))
+                   (not (equal (match-string 1 ligne) principal)))
+          (setq externe (match-string 1 ligne))))
+      (cond
+       ((not externe) (message "Aucun écran externe connecté"))
+       ;; « NOM connected 1920x1080+… » : une géométrie signifie qu'il est allumé.
+       ((string-match-p (concat "^" externe " connected[^\n]*[0-9]+x[0-9]+\\+") sortie)
+        (start-process "xrandr" nil "xrandr" "--output" externe "--off")
+        (message "Écran externe %s éteint" externe))
+       (t
+        (start-process "xrandr" nil "xrandr" "--output" externe
+                       "--auto" "--right-of" (or principal "eDP-1"))
+        (message "Écran externe %s activé" externe))))))
+
+(defun usr-reseau-basculer ()
+  "Active ou coupe la radio sans-fil."
+  (interactive)
+  (when (usr--binaire "rfkill")
+    (let ((bloque (string-match-p
+                   "blocked: yes"
+                   (shell-command-to-string "rfkill list wifi"))))
+      (start-process "rfkill" nil "rfkill"
+                     (if bloque "unblock" "block") "wifi")
+      (message "Sans-fil %s" (if bloque "activé" "coupé")))))
+
 ;;;; --- Touches directes -----------------------------------------------------
 
-(dolist (paire
-         '(;; La porte d'entrée unique
+(defun usr--lier-touche (touche commande)
+  "Lie TOUCHE à COMMANDE pour EXWM sans interrompre le chargement en cas d'échec.
+Une touche absente du clavier est simplement ignorée."
+  (condition-case err
+      (exwm-input-set-key (kbd touche) commande)
+    (error (message "Raccourci ignoré (%s) : %s"
+                    touche (error-message-string err)))))
+
+(defvar usr--touches-declarees
+  '(;; --- La porte d'entrée unique ---
            ("s-SPC"     . usr-menu-ouvrir)
-           ;; Gestes réflexes
+
+           ;; --- Gestes réflexes ---
            ("s-<left>"  . windmove-left)
            ("s-<right>" . windmove-right)
            ("s-<up>"    . windmove-up)
            ("s-<down>"  . windmove-down)
            ("s-<tab>"   . exwm-layout-toggle-fullscreen)
-           ;; Touches dédiées du clavier
+           ("s-o"       . delete-other-windows)   ; ne garder que celle-ci
+
+           ;; --- Son et lecture ---
            ("<XF86AudioRaiseVolume>"  . usr-volume-monter)
            ("<XF86AudioLowerVolume>"  . usr-volume-baisser)
            ("<XF86AudioMute>"         . usr-volume-couper)
+           ("<XF86AudioMicMute>"      . usr-micro-couper)
            ("<XF86AudioPlay>"         . emms-pause)
+           ("<XF86AudioStop>"         . emms-stop)
            ("<XF86AudioNext>"         . emms-next)
            ("<XF86AudioPrev>"         . emms-previous)
+           ("<XF86AudioForward>"      . emms-seek-forward)
+           ("<XF86AudioRewind>"       . emms-seek-backward)
+           ("<XF86AudioMedia>"        . emms)
+
+           ;; --- Écran et rétroéclairage ---
            ("<XF86MonBrightnessUp>"   . usr-luminosite-monter)
-           ("<XF86MonBrightnessDown>" . usr-luminosite-baisser)))
-  (exwm-input-set-key (kbd (car paire)) (cdr paire)))
+           ("<XF86MonBrightnessDown>" . usr-luminosite-baisser)
+           ("<XF86KbdBrightnessUp>"   . usr-clavier-retroeclairage-monter)
+           ("<XF86KbdBrightnessDown>" . usr-clavier-retroeclairage-baisser)
+           ("<XF86Display>"           . usr-affichage-basculer)
+
+           ;; --- Matériel et énergie ---
+           ("<XF86TouchpadToggle>"    . usr-pave-tactile-basculer)
+           ("<XF86WLAN>"              . usr-reseau-basculer)
+           ("<XF86ScreenSaver>"       . usr-ecran-verrouiller)
+           ("<XF86Sleep>"             . usr-veille)
+           ("<XF86PowerOff>"          . usr-eteindre)
+           ("<XF86Battery>"           . battery)
+
+           ;; --- Lancement : chaque touche fait ce que son pictogramme annonce ---
+           ("<XF86Search>"            . usr-menu-ouvrir)
+           ("<XF86HomePage>"          . usr-navigateur)
+           ("<XF86Mail>"              . usr-menu-courriel)
+           ("<XF86Explorer>"          . dired)
+           ("<XF86MyComputer>"        . dired)
+           ("<XF86Calculator>"        . calc)
+           ("<XF86Tools>"             . usr-menu-systeme)
+           ("<XF86Favorites>"         . bookmark-jump)
+           ("<XF86Open>"              . find-file)
+           ("<XF86Back>"              . previous-buffer)
+           ("<XF86Forward>"           . next-buffer)
+           ("<XF86Reload>"            . usr-configuration-recharger))
+  "Touches globales déclarées, sous forme (TOUCHE . COMMANDE).
+Sert aussi de source à `usr-touches-materielles'.")
+
+(dolist (paire usr--touches-declarees)
+  (usr--lier-touche (car paire) (cdr paire)))
 
 ;; Porte de secours quand la touche Super n'est pas disponible : Emacs en
 ;; terminal, emacsclient hors session X, machine distante.
 (keymap-global-set "C-c SPC" #'usr-menu-ouvrir)
+
+(defun usr-touches-materielles ()
+  "Liste les touches XF86 déclarées et celles que le clavier émet réellement.
+Une touche déclarée mais absente du clavier ne coûte rien ; l'inverse
+signale une touche disponible qui n'est pas encore exploitée."
+  (interactive)
+  (let ((declarees
+         ;; « <XF86AudioMute> » -> « XF86AudioMute », pour comparer à xmodmap.
+         (sort (delq nil
+                     (mapcar (lambda (k)
+                               (when (string-match "\\`<\\(XF86[A-Za-z0-9]+\\)>\\'" k)
+                                 (match-string 1 k)))
+                             (mapcar #'car usr--touches-declarees)))
+               #'string<))
+        (emises
+         (when (executable-find "xmodmap")
+           (sort (delete-dups
+                  (seq-filter (lambda (s) (string-prefix-p "XF86" s))
+                              (split-string
+                               (shell-command-to-string "xmodmap -pke") "[ \n]+" t)))
+                 #'string<))))
+    (with-current-buffer (get-buffer-create "*touches matérielles*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (org-mode)
+        (insert "#+TITLE: Touches matérielles\n#+OPTIONS: toc:nil\n\n")
+        (insert (format "* Déclarées dans la configuration (%d)\n\n" (length declarees)))
+        (dolist (d declarees) (insert (format "  - %s\n" d)))
+        (insert "\n* Émises par ce clavier\n\n")
+        (cond
+         ((not emises)
+          (insert "  xmodmap n'est pas installé : impossible d'interroger le clavier.\n"
+                  "  Ajoutez « xmodmap » à home.scm, ou appuyez sur une touche après\n"
+                  "  C-h k depuis un tampon Emacs pour connaître son nom.\n"))
+         (t
+          (dolist (e emises)
+            (insert (format "  - %s%s\n" e
+                            (if (member e declarees) "" "   ← non exploitée"))))))
+        (goto-char (point-min))))
+    (pop-to-buffer "*touches matérielles*")))
 
 ;;;; --- Carte des raccourcis -------------------------------------------------
 
