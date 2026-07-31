@@ -979,67 +979,52 @@ Lecture en Lisp pur, sans lancer de processus — même approche que
                  nil t)
                 t)))))
 
-(defun lateci--sonder (nom commande rappel)
-  "Exécute COMMANDE en arrière-plan sous le nom NOM.
-RAPPEL reçoit le code de sortie et la sortie complète, une fois le
-processus réellement terminé.
-
-La sortie transite par un tampon plutôt que par un `:filter' : un filtre
-est appelé par fragments, et une réponse coupée au mauvais endroit
-passerait à côté du motif recherché."
-  (let ((tampon (generate-new-buffer (format " *%s*" nom))))
-    (make-process
-     :name nom
-     :buffer tampon
-     :noquery t
-     :command commande
-     :sentinel
-     (lambda (proc _event)
-       ;; Garde explicite : le sentinelle peut être appelé sur d'autres
-       ;; transitions, où `process-exit-status' ne veut rien dire.
-       (when (memq (process-status proc) '(exit signal))
-         (let ((code (process-exit-status proc))
-               (sortie (with-current-buffer (process-buffer proc)
-                         (buffer-string))))
-           (kill-buffer (process-buffer proc))
-           (funcall rappel code sortie)))))))
-
 (defun lateci--verifier-systeme ()
-  "Met à jour les indicateurs système de la modeline.
+  "Moteur de vérification principal, asynchrone."
+  ;; 1. GPG Async
+  (setq lateci--gpg-unlocked nil)
+  (make-process
+   :name "gpg-check" :buffer nil :noquery t
+   :command '("gpg-connect-agent" "keyinfo --list" "/bye")
+   :filter (lambda (_proc output)
+             (when (string-match-p "KEYINFO .*\\b1\\b" output)
+               (setq lateci--gpg-unlocked t)))
+   :sentinel (lambda (_proc _event) (lateci--actualiser-affichage)))
 
-Deux processus au plus par passage, contre quatre auparavant : le réseau
-et le montage distant se lisent directement dans /proc, et un unique
-`pgrep' couvre les deux démons."
-  ;; 1 et 2. Réseau et montage distant : Lisp pur, aucun processus.
+  ;; 2. Montage distant — lu dans /proc/mounts, sans lancer de processus.
+  (setq lateci--ssh-mounted (lateci--monte-p "~/Club1"))
+
+  ;; 3. Réseau — lu dans /proc/net/route, sans lancer de processus.
   (setq lateci--reseau-online (lateci--network-online-p))
-  (setq lateci--ssh-mounted   (lateci--monte-p "~/Club1"))
 
-  ;; 3. État de la clé GPG.
-  (lateci--sonder
-   "gpg-check" '("gpg-connect-agent" "keyinfo --list" "/bye")
-   (lambda (_code sortie)
-     (setq lateci--gpg-unlocked
-           (and (string-match-p "KEYINFO .*\\b1\\b" sortie) t))
-     (lateci--actualiser-affichage)))
+  ;; 4. Syncthing Async
+  (make-process
+   :name "syncthing-check" :buffer nil :noquery t
+   :command '("pgrep" "-x" "syncthing")
+   :sentinel (lambda (proc _event)
+               (when (memq (process-status proc) '(exit signal))
+                 (setq lateci--syncthing-online (= (process-exit-status proc) 0))
+                 (lateci--actualiser-affichage))))
 
-  ;; 4. Les deux démons en un seul appel.
-  (lateci--sonder
-   "daemons-check" '("pgrep" "-x" "-l" "syncthing|hydroxide")
-   (lambda (_code sortie)
-     (setq lateci--syncthing-online (and (string-match-p "syncthing" sortie) t)
-           lateci--hydroxide-online (and (string-match-p "hydroxide" sortie) t))
-     (lateci--actualiser-affichage)))
+  ;; 5. Hydroxide Async
+  (make-process
+   :name "hydroxide-check" :buffer nil :noquery t
+   :command '("pgrep" "-x" "hydroxide")
+   :sentinel (lambda (proc _event)
+               (when (memq (process-status proc) '(exit signal))
+                 (setq lateci--hydroxide-online (= (process-exit-status proc) 0))
+                 (lateci--actualiser-affichage))))
 
-  ;; Affichage immédiat des indicateurs synchrones, sans attendre les
-  ;; deux processus.
+  ;; Reflète tout de suite le réseau et le montage, sans attendre les sondes.
   (lateci--actualiser-affichage))
 
-(defvar lateci-sondage-intervalle 60
+(defvar lateci-sondage-intervalle 30
   "Intervalle, en secondes, entre deux sondages de l'état système.
 
 Les commandes qui changent cet état (montage, Syncthing, GPG) forcent
-elles-mêmes un rafraîchissement : cet intervalle ne conditionne que la
-détection des changements venus de l'extérieur.")
+elles-mêmes un rafraîchissement immédiat : cet intervalle ne conditionne
+que la détection des changements venus de l'extérieur. Remettre 10 pour
+l'ancien comportement.")
 
 (defvar lateci--verifier-systeme-timer nil
   "Minuteur de sondage système, conservé pour pouvoir être annulé.")
@@ -2292,15 +2277,13 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
   :defer t
   :custom
   (syncthing-host "127.0.0.1:8384")
-  :config
-  ;; Le jeton était lu dans un `:custom'. Or `:custom' se traduit par un
-  ;; `customize-set-variable' placé avant `:init' dans le corps engendré :
-  ;; il s'exécute au démarrage, malgré le `:defer t'. Chaque lancement
-  ;; d'Emacs — donc de la session X — appelait ainsi `pass show', puis gpg,
-  ;; et si la clé n'était pas déverrouillée, pinentry bloquait le démarrage.
-  ;; En `:config', la lecture n'a lieu qu'au premier `M-x syncthing'.
-  (setq syncthing-default-server-token
-        (string-trim (shell-command-to-string "pass show api/syncthing"))))
+  ;; La lecture du jeton reste ici, donc au démarrage d'Emacs : .bash_profile
+  ;; déverrouille la clé GPG avant startx, elle est en cache, `pass show'
+  ;; répond immédiatement. Différer cet appel le déplacerait vers un moment où
+  ;; le cache peut avoir expiré, et le message d'erreur de gpg finirait dans
+  ;; le jeton lui-même.
+  (syncthing-default-server-token
+    (string-trim (shell-command-to-string "pass show api/syncthing"))))
 
 (defun st-on ()
   "Démarre Syncthing via le gestionnaire de services Shepherd."
