@@ -941,17 +941,21 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
   (setq global-mode-string (append global-mode-string '(lateci--system-status-string))))
 
 (defun lateci--actualiser-affichage ()
-  "Génère le texte compact et force la mise à jour visuelle."
-  (let ((symboles (delq nil (list (when lateci--gpg-unlocked "gpg")
-                                  (when lateci--reseau-online "net")
-                                  (when lateci--ssh-mounted "srv")
-                                  (when lateci--syncthing-online "lan")
-                                  (when lateci--hydroxide-online "eml"))))) ; <-- Modifié ici
-    (setq lateci--system-status-string
+  "Met à jour l'état système uniquement s'il a changé."
+  (let* ((symboles
+          (delq nil
+                (list (when lateci--gpg-unlocked "gpg")
+                      (when lateci--reseau-online "net")
+                      (when lateci--ssh-mounted "srv")
+                      (when lateci--syncthing-online "lan")
+                      (when lateci--hydroxide-online "eml"))))
+         (nouveau
           (if symboles
-              (format "[%s] " (mapconcat 'identity symboles " "))
-            " "))
-    (force-mode-line-update t)))
+              (format "[%s] " (mapconcat #'identity symboles " "))
+            " ")))
+    (unless (equal nouveau lateci--system-status-string)
+      (setq lateci--system-status-string nouveau)
+      (force-mode-line-update t))))
 
 (defun lateci--network-online-p ()
   "Vérifie localement si une route par défaut active existe (sans envoyer de paquets)."
@@ -979,9 +983,18 @@ Lecture en Lisp pur, sans lancer de processus — même approche que
                  nil t)
                 t)))))
 
+(defun lateci--processus-actif-p (nom)
+  "Retourne non-nil si un processus dont la commande est NOM existe."
+  (seq-some
+   (lambda (pid)
+     (when-let ((attributs (process-attributes pid)))
+       (string= (alist-get 'comm attributs) nom)))
+   (list-system-processes)))
+
 (defun lateci--verifier-systeme ()
-  "Moteur de vérification principal, asynchrone."
-  ;; 1. GPG Async
+  "Met à jour les indicateurs système de la modeline.
+Seul l'état de la clé GPG demande un processus ; le reste se lit
+directement dans /proc."
   (setq lateci--gpg-unlocked nil)
   (make-process
    :name "gpg-check" :buffer nil :noquery t
@@ -991,48 +1004,26 @@ Lecture en Lisp pur, sans lancer de processus — même approche que
                (setq lateci--gpg-unlocked t)))
    :sentinel (lambda (_proc _event) (lateci--actualiser-affichage)))
 
-  ;; 2. Montage distant — lu dans /proc/mounts, sans lancer de processus.
-  (setq lateci--ssh-mounted (lateci--monte-p "~/Club1"))
+  (setq lateci--syncthing-online
+	(lateci--processus-actif-p "syncthing")
+	lateci--hydroxide-online
+	(lateci--processus-actif-p "hydroxide")
+	lateci--reseau-online
+	(lateci--network-online-p)
+	lateci--ssh-mounted
+	(lateci--monte-p "~/Club1"))
 
-  ;; 3. Réseau — lu dans /proc/net/route, sans lancer de processus.
-  (setq lateci--reseau-online (lateci--network-online-p))
-
-  ;; 4. Syncthing Async
-  (make-process
-   :name "syncthing-check" :buffer nil :noquery t
-   :command '("pgrep" "-x" "syncthing")
-   :sentinel (lambda (proc _event)
-               (when (memq (process-status proc) '(exit signal))
-                 (setq lateci--syncthing-online (= (process-exit-status proc) 0))
-                 (lateci--actualiser-affichage))))
-
-  ;; 5. Hydroxide Async
-  (make-process
-   :name "hydroxide-check" :buffer nil :noquery t
-   :command '("pgrep" "-x" "hydroxide")
-   :sentinel (lambda (proc _event)
-               (when (memq (process-status proc) '(exit signal))
-                 (setq lateci--hydroxide-online (= (process-exit-status proc) 0))
-                 (lateci--actualiser-affichage))))
-
-  ;; Reflète tout de suite le réseau et le montage, sans attendre les sondes.
   (lateci--actualiser-affichage))
 
-(defvar lateci-sondage-intervalle 30
-  "Intervalle, en secondes, entre deux sondages de l'état système.
-
-Les commandes qui changent cet état (montage, Syncthing, GPG) forcent
-elles-mêmes un rafraîchissement immédiat : cet intervalle ne conditionne
-que la détection des changements venus de l'extérieur. Remettre 10 pour
-l'ancien comportement.")
+(defvar lateci-sondage-intervalle 60
+  "Intervalle, en secondes, entre deux sondages de l'état système.")
 
 (defvar lateci--verifier-systeme-timer nil
   "Minuteur de sondage système, conservé pour pouvoir être annulé.")
 
 ;; Idempotent : `s-r' recharge ce fichier, et sans cette garde chaque
-;; rechargement empilait un minuteur supplémentaire — donc autant de séries
-;; de processus de sondage en parallèle. `M-x list-timers' doit n'afficher
-;; qu'une seule entrée `lateci--verifier-systeme'.
+;; rechargement empilait un minuteur supplémentaire. `M-x list-timers' doit
+;; n'afficher qu'une seule entrée `lateci--verifier-systeme'.
 (when (timerp lateci--verifier-systeme-timer)
   (cancel-timer lateci--verifier-systeme-timer))
 
