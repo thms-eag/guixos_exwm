@@ -2,7 +2,11 @@
 ;;; BASE ::::::::::::::::::::::::::::::::::::::::::::::::::::
 (setq server-socket-dir (expand-file-name "server" user-emacs-directory))
 (setenv "EMACS_SOCKET_NAME" (expand-file-name "server" server-socket-dir))
-(server-start)
+;; Idempotent : `s-r' recharge ce fichier, et un Emacs de diagnostic peut être
+;; lancé à côté de la session sans entrer en conflit avec le serveur en place.
+(require 'server)
+(unless (server-running-p)
+  (server-start))
 
 ;;;; Emacs 29 available?
 (when (< emacs-major-version 29)
@@ -16,7 +20,15 @@
 ;;;; Package Management
 (setq use-package-always-ensure nil
       package-native-compile t
-      warning-minimum-level :emergency)
+      ;; On fait taire le bruit de la compilation native, et rien d'autre :
+      ;; `warning-minimum-level' garde son défaut (:warning) pour que
+      ;; *Warnings* reste exploitable au diagnostic.
+      native-comp-async-report-warnings-errors 'silent)
+
+;; Mesure du démarrage, à la demande : LATECI_STATS=1 emacs …
+;; puis M-x use-package-report. Aucun surcoût sinon.
+(setq use-package-compute-statistics (and (getenv "LATECI_STATS") t))
+
 (require 'use-package)
 (require 'org)
 
@@ -48,9 +60,22 @@
            "git")))
     (display-warning 'init "Fichier ews.el introuvable. EXWM démarre en mode dégradé (les raccourcis spécifiques EWS généreront des erreurs)." :warning)))
 
+;; Repli, à exécuter APRÈS la tentative de chargement ci-dessus.
+;; `defvar' ne fixe une valeur que si la variable est vide : si ews.el a été
+;; chargé, ces deux formes sont sans effet. Sinon elles évitent une
+;; `void-variable' plus bas (citar, puis org-cite au niveau supérieur), qui
+;; interromprait le chargement en plein milieu du fichier et laisserait
+;; courriel, gptel et comptabilité non chargés, sans aucun message.
+(defvar ews-bibtex-files nil
+  "Repli lorsque ews.el est absent : aucune bibliographie.")
+(defvar ews-bibtex-directory nil
+  "Repli lorsque ews.el est absent.")
+
 ;;;; Org-mode
 (use-package org
-  :ensure t
+  ;; :ensure nil — sous Guix les paquets viennent du profil, package.el n'est
+  ;; pas alimenté : `:ensure t' tenterait un package-install sans archive.
+  :ensure nil
   :demand t
   
   :init
@@ -255,7 +280,7 @@
 | %?                           |   1 |            0 |          0 |
 |------------------------------+-----+--------------+------------|
 | *TOTAL*                      |     |              |          0 |
-#+TBLFM: $4=$2*$3::@3$4=vsum(@2$4..@-1$4);%.2f
+#+TBLFM: $4=$2*$3;N :: @>$4=vsum(@I..@II);%.2f
 
 #+BEGIN_EXPORT latex
 \\vspace{1cm}
@@ -556,7 +581,9 @@
 (use-package modus-themes
   :ensure nil
   :init
-  (mapc #'disable-theme custom-enabled-themes)
+  ;; copy-sequence : `disable-theme' retire l'élément de `custom-enabled-themes'
+  ;; au fil de l'itération, ce qui ferait sauter un thème sur deux au rechargement.
+  (mapc #'disable-theme (copy-sequence custom-enabled-themes))
   (load-theme 'modus-operandi t)
   
   :custom
@@ -581,33 +608,98 @@
 ;;(add-to-list 'default-frame-alist '(internal-border-width . 15))
 ;;(modify-all-frames-parameters '((internal-border-width . 15)))
 
-;; Appliquer les couleurs une fois le thème Modus chargé
-(with-eval-after-load 'modus-themes
-  
-  ;; 1. Trait séparant les fenêtres (vertical-border)
-  ;; Ici, il prend la couleur du fond pour devenir invisible. 
-  ;; Si tu veux une ligne visible fine, remplace `(face-attribute 'default :background)` par `"grey50"`
-  (set-face-attribute 'vertical-border nil 
-                      :foreground (face-attribute 'default :background))
-
-  ;; 2. Couleur de la marge globale autour de l'écran
-  (set-face-attribute 'internal-border nil 
-                      :background (face-attribute 'default :background)))
-
 ;; Activer des espaces vides entre les fenêtres
 (setq window-divider-default-right-width 10   ;; Espace vertical entre fenêtres côte à côte
       window-divider-default-bottom-width 10) ;; Espace horizontal entre fenêtres superposées
 (window-divider-mode 1)
 
-;; Rendre ces espaces de la couleur du fond d'écran
-(with-eval-after-load 'modus-themes
-  (set-face-attribute 'window-divider nil :foreground (face-attribute 'default :background))
-  (set-face-attribute 'window-divider-first-pixel nil :foreground (face-attribute 'default :background))
-  (set-face-attribute 'window-divider-last-pixel nil :foreground (face-attribute 'default :background)))
+;;;; RETOUCHES DE FACES ::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+;;
+;; `set-face-attribute' modifie une face directement, en dehors de tout thème.
+;; Or `enable-theme' recalcule chaque face à partir de sa spécification, ce qui
+;; efface ces retouches — y compris les attributs que le thème ne touche pas,
+;; comme la taille de police. Sans le crochet installé plus bas, tout ce bloc
+;; était donc perdu au premier `C-c w t t' : police rétrécie, séparateurs
+;; redevenus visibles, modeline inactive au fond clair sur thème sombre,
+;; hiérarchie des titres Org aplatie.
+;;
+;; Les couleurs sont relues à chaque passage (`fond' ci-dessous), et le
+;; calendrier hérite de faces sémantiques plutôt que de couleurs littérales :
+;; l'ensemble suit donc le thème actif, clair comme sombre.
 
-;;;; Augmenter la taille de police globale
-(set-face-attribute 'default nil
-		    :height 120)
+(defun lateci--set-face (face &rest attributs)
+  "Applique ATTRIBUTS à FACE, si FACE existe.
+La garde évite d'échouer sur les faces d'un paquet non encore chargé."
+  (when (facep face)
+    (apply #'set-face-attribute face nil attributs)))
+
+(defun lateci/appliquer-faces (&rest _)
+  "Applique les retouches de faces propres à cette configuration.
+Rejouée à chaque activation de thème via `enable-theme-functions'."
+  (let ((fond (face-attribute 'default :background)))
+
+    ;; --- Taille de police globale ---
+    (lateci--set-face 'default :height 120)
+
+    ;; --- Séparateurs fondus dans le fond ---
+    ;; Pour une ligne fine visible, remplacer `fond' par "grey50".
+    (lateci--set-face 'vertical-border :foreground fond)
+    (lateci--set-face 'internal-border :background fond)
+    (dolist (face '(window-divider
+                    window-divider-first-pixel
+                    window-divider-last-pixel))
+      (lateci--set-face face :foreground fond))
+
+    ;; --- Modeline ---
+    ;; mode-line-active est le paramètre distinct d'Emacs 29+ ; mode-line reste
+    ;; réglée pour les faces qui en héritent.
+    (lateci--set-face 'mode-line :height 0.90)
+    (lateci--set-face 'mode-line-active :height 0.90)
+    ;; Modeline inactive masquée : texte et fond à la couleur du fond d'Emacs.
+    (lateci--set-face 'mode-line-inactive
+                      :foreground fond
+                      :background fond
+                      :box nil
+                      :overline nil
+                      :underline nil)
+
+    ;; --- Org : hiérarchie des titres ---
+    (lateci--set-face 'org-document-title :height 1.5  :weight 'bold)
+    (lateci--set-face 'org-level-1        :height 1.3  :weight 'bold)
+    (lateci--set-face 'org-level-2        :height 1.2  :weight 'bold)
+    (lateci--set-face 'org-level-3        :height 1.1  :weight 'semi-bold)
+    (lateci--set-face 'org-level-4        :height 1.05)
+    (lateci--set-face 'org-level-5        :height 1.0)
+    (lateci--set-face 'org-level-6        :height 1.0)
+
+    ;; --- Org : étiquettes et horodatages ---
+    (lateci--set-face 'org-tag
+                      :box '(:line-width 1 :color "grey50")
+                      :height 0.8
+                      :weight 'normal)
+    (lateci--set-face 'org-date
+                      :box '(:line-width 1 :color "grey70")
+                      :underline nil)
+
+    ;; --- Calendrier ---
+    ;; `:inherit' de faces sémantiques (highlight, error, success) plutôt que
+    ;; des couleurs littérales : elles suivent le thème. L'ancienne version
+    ;; codait « white sur dark blue » et « firebrick », illisibles en sombre.
+    (lateci--set-face 'calendar-today :inherit 'highlight :weight 'bold)
+    (lateci--set-face 'calendar-weekend-header :inherit 'error)
+    (lateci--set-face 'calendar-month-header :weight 'bold :height 1.2)
+    (lateci--set-face 'diary :inherit 'success :weight 'bold)))
+
+;; Rejouée à chaque activation de thème (Emacs 29+).
+(add-hook 'enable-theme-functions #'lateci/appliquer-faces)
+
+;; Les faces du calendrier n'existent qu'une fois leur paquet chargé : on
+;; rejoue alors la fonction pour qu'elles ne soient pas laissées de côté.
+(with-eval-after-load 'calendar (lateci/appliquer-faces))
+(with-eval-after-load 'diary-lib (lateci/appliquer-faces))
+
+;; Application initiale : le thème est chargé plus haut.
+(lateci/appliquer-faces)
 
 ;;;; Short answers only please
 (setq-default use-short-answers t)
@@ -616,19 +708,25 @@
 (setq inhibit-startup-screen t)
 (setq initial-buffer-choice (lambda () (get-buffer "*Messages*")))
 
-(add-hook 'emacs-startup-hook
-          (lambda ()
-            (when (get-buffer "*scratch*")
-              (kill-buffer "*scratch*"))))
+;; Fonctions nommées plutôt que lambdas anonymes : `add-hook' peut alors
+;; reconnaître une entrée déjà présente et ne pas l'empiler à chaque `s-r'.
+(defun lateci--tuer-scratch ()
+  "Supprime le tampon *scratch* au démarrage."
+  (when (get-buffer "*scratch*")
+    (kill-buffer "*scratch*")))
 
-(add-hook 'kill-buffer-hook
-          (lambda ()
-            (unless (seq-some (lambda (buf)
-                                (let ((name (buffer-name buf)))
-                                  (and (not (string-prefix-p " " name))
-                                       (not (eq buf (current-buffer))))))
-                              (buffer-list))
-              (switch-to-buffer "*Messages*"))))
+(add-hook 'emacs-startup-hook #'lateci--tuer-scratch)
+
+(defun lateci--garder-un-tampon ()
+  "Bascule sur *Messages* lorsque le dernier tampon visible est tué."
+  (unless (seq-some (lambda (buf)
+                      (let ((name (buffer-name buf)))
+                        (and (not (string-prefix-p " " name))
+                             (not (eq buf (current-buffer))))))
+                    (buffer-list))
+    (switch-to-buffer "*Messages*")))
+
+(add-hook 'kill-buffer-hook #'lateci--garder-un-tampon)
 
 ;;;; Mixed-pitch mode
 (use-package mixed-pitch
@@ -698,7 +796,7 @@
   :config
   (which-key-mode)
   :custom
-  (which-key-max-iption-length 40)
+  (which-key-max-description-length 40)
   (which-key-lighter nil)
   (which-key-sort-order 'which-key-description-order)
   :init
@@ -772,31 +870,23 @@
   (org-mode . org-fragtog-mode)
   :custom
   (org-startup-with-latex-preview nil)
-  (org-format-latex-options
-   (plist-put org-format-latex-options :scale 2)
-   (plist-put org-format-latex-options :foreground 'auto)
-   (plist-put org-format-latex-options :background 'auto)))
+  :config
+  ;; `:custom' attend (VARIABLE VALEUR [COMMENTAIRE]) : au-delà du 3e élément
+  ;; tout est ignoré. Les trois plist-put y étaient donc lus comme
+  ;; « valeur + commentaire + rebut », et seul :scale était appliqué —
+  ;; les aperçus LaTeX gardaient des couleurs fixes en thème sombre.
+  (setq org-format-latex-options (plist-put org-format-latex-options :scale 2))
+  (setq org-format-latex-options (plist-put org-format-latex-options :foreground 'auto))
+  (setq org-format-latex-options (plist-put org-format-latex-options :background 'auto)))
 
-;; Tailles des headings (à ajuster selon ton goût / police)
-(with-eval-after-load 'org
-  (set-face-attribute 'org-document-title nil
-                      :height 1.5 :weight 'bold)
-  (set-face-attribute 'org-level-1 nil
-                      :height 1.3 :weight 'bold)
-  (set-face-attribute 'org-level-2 nil
-                      :height 1.2 :weight 'bold)
-  (set-face-attribute 'org-level-3 nil
-                      :height 1.1 :weight 'semi-bold)
-  (set-face-attribute 'org-level-4 nil
-                      :height 1.05)
-  (set-face-attribute 'org-level-5 nil
-                      :height 1.0)
-  (set-face-attribute 'org-level-6 nil
-                      :height 1.0))
+;; Les tailles des titres Org, org-tag et org-date sont réglées par
+;; `lateci/appliquer-faces' (section RETOUCHES DE FACES), afin d'être
+;; réappliquées à chaque changement de thème.
 
 (with-eval-after-load 'org
-  ;; 1. Les mots-clés TODO en mode "bouton"
-  ;; J'ai repris ta liste exacte de mots-clés pour leur assigner une couleur et une boîte
+  ;; Les mots-clés TODO en mode "bouton".
+  ;; `org-todo-keyword-faces' est une variable, pas une face : son contenu
+  ;; survit au changement de thème, d'où son maintien ici.
   (setq org-todo-keyword-faces
         '(("TODO"   . (:foreground "firebrick"   :weight bold :box (:line-width 1 :style released-button)))
           ("NEXT"   . (:foreground "royalblue"   :weight bold :box (:line-width 1 :style released-button)))
@@ -806,19 +896,7 @@
           ("PRATOS" . (:foreground "dark cyan"   :weight bold :box (:line-width 1 :style released-button)))
           ("EVNT"   . (:foreground "goldenrod"   :weight bold :box (:line-width 1 :style released-button)))
           ("DONE"   . (:foreground "forest green" :weight bold :strike-through t))
-          ("CANCELLED" . (:foreground "grey"     :weight bold :strike-through t))))
-
-  ;; 2. Les Tags encapsulés dans une boîte discrète
-  ;; On réduit légèrement la taille de la police (:height 0.8) pour accentuer l'effet étiquette
-  (set-face-attribute 'org-tag nil
-                      :box '(:line-width 1 :color "grey50")
-                      :height 0.8
-                      :weight 'normal)
-
-  ;; 3. Les Dates et horodatages
-  (set-face-attribute 'org-date nil
-                      :box '(:line-width 1 :color "grey70")
-                      :underline nil))
+          ("CANCELLED" . (:foreground "grey"     :weight bold :strike-through t)))))
 
 
 ;;;; MODELINE
@@ -829,23 +907,9 @@
     ;; 2. On applique la réduction de manière fixe
     (face-remap-add-relative 'default :height 0.90)))
 
-;; Réduire la taille de la modeline de 20% par rapport à la police par défaut
-;; Face de base (par sécurité pour les héritages)
-(set-face-attribute 'mode-line nil :height 0.90)
-
-;; Fenêtre active (le paramètre manquant pour Emacs 29+)
-(set-face-attribute 'mode-line-active nil :height 0.90)
-
-;; Masquer la modeline inactive en fusionnant ses couleurs avec le fond par défaut
-(set-face-attribute 'mode-line-inactive nil
-                    ;; Le texte prend la couleur du fond d'Emacs
-                    :foreground (face-attribute 'default :background)
-                    ;; Le fond de la modeline prend la couleur du fond d'Emacs
-                    :background (face-attribute 'default :background)
-                    ;; Supprimer les bordures ou ombres éventuelles
-                    :box nil
-                    :overline nil
-                    :underline nil)
+;; Les faces mode-line, mode-line-active et mode-line-inactive sont réglées par
+;; `lateci/appliquer-faces' (section RETOUCHES DE FACES) : leur couleur dépend
+;; du fond, qui change avec le thème.
 
 (use-package time
   :ensure nil
@@ -877,17 +941,21 @@
   (setq global-mode-string (append global-mode-string '(lateci--system-status-string))))
 
 (defun lateci--actualiser-affichage ()
-  "Génère le texte compact et force la mise à jour visuelle."
-  (let ((symboles (delq nil (list (when lateci--gpg-unlocked "gpg")
-                                  (when lateci--reseau-online "net")
-                                  (when lateci--ssh-mounted "srv")
-                                  (when lateci--syncthing-online "lan")
-                                  (when lateci--hydroxide-online "eml"))))) ; <-- Modifié ici
-    (setq lateci--system-status-string
+  "Met à jour l'état système uniquement s'il a changé."
+  (let* ((symboles
+          (delq nil
+                (list (when lateci--gpg-unlocked "gpg")
+                      (when lateci--reseau-online "net")
+                      (when lateci--ssh-mounted "srv")
+                      (when lateci--syncthing-online "lan")
+                      (when lateci--hydroxide-online "eml"))))
+         (nouveau
           (if symboles
-              (format "[%s] " (mapconcat 'identity symboles " "))
-            " "))
-    (force-mode-line-update t)))
+              (format "[%s] " (mapconcat #'identity symboles " "))
+            " ")))
+    (unless (equal nouveau lateci--system-status-string)
+      (setq lateci--system-status-string nouveau)
+      (force-mode-line-update t))))
 
 (defun lateci--network-online-p ()
   "Vérifie localement si une route par défaut active existe (sans envoyer de paquets)."
@@ -899,47 +967,69 @@
            ;; Cherche '00000000' dans la colonne Destination (indique la passerelle par défaut)
            (not (null (re-search-forward "^[a-z0-9]+\\s-+00000000\\s-+" nil t)))))))
 
+(defun lateci--monte-p (point-de-montage)
+  "Vrai si POINT-DE-MONTAGE figure dans /proc/mounts.
+Lecture en Lisp pur, sans lancer de processus — même approche que
+`lateci--network-online-p'."
+  (let ((chemin (directory-file-name (expand-file-name point-de-montage))))
+    (and (file-exists-p "/proc/mounts")
+         (with-temp-buffer
+           (insert-file-contents "/proc/mounts")
+           (goto-char (point-min))
+           ;; Chaque ligne : périphérique, point de montage, type, options…
+           ;; Le noyau échappe les espaces du chemin en \040.
+           (and (search-forward
+                 (concat " " (string-replace " " "\\040" chemin) " ")
+                 nil t)
+                t)))))
+
+(defun lateci--processus-actif-p (nom)
+  "Retourne non-nil si un processus dont la commande est NOM existe."
+  (seq-some
+   (lambda (pid)
+     (when-let ((attributs (process-attributes pid)))
+       (string= (alist-get 'comm attributs) nom)))
+   (list-system-processes)))
+
 (defun lateci--verifier-systeme ()
-  "Moteur de vérification principal 100% asynchrone."
-  ;; 1. GPG Async
+  "Met à jour les indicateurs système de la modeline.
+Seul l'état de la clé GPG demande un processus ; le reste se lit
+directement dans /proc."
   (setq lateci--gpg-unlocked nil)
   (make-process
-   :name "gpg-check" :buffer nil
+   :name "gpg-check" :buffer nil :noquery t
    :command '("gpg-connect-agent" "keyinfo --list" "/bye")
    :filter (lambda (_proc output)
              (when (string-match-p "KEYINFO .*\\b1\\b" output)
                (setq lateci--gpg-unlocked t)))
    :sentinel (lambda (_proc _event) (lateci--actualiser-affichage)))
 
-  ;; 2. SSH Async
-  (make-process
-   :name "ssh-check" :buffer nil
-   :command (list "mountpoint" "-q" (expand-file-name "~/Club1"))
-   :sentinel (lambda (proc _event)
-               (setq lateci--ssh-mounted (= (process-exit-status proc) 0))
-               (lateci--actualiser-affichage)))
-  
-  ;; 3. Syncthing Async
-  (make-process
-   :name "syncthing-check" :buffer nil
-   :command '("pgrep" "-x" "syncthing")
-   :sentinel (lambda (proc _event)
-               (setq lateci--syncthing-online (= (process-exit-status proc) 0))
-               (lateci--actualiser-affichage)))
+  (setq lateci--syncthing-online
+	(lateci--processus-actif-p "syncthing")
+	lateci--hydroxide-online
+	(lateci--processus-actif-p "hydroxide")
+	lateci--reseau-online
+	(lateci--network-online-p)
+	lateci--ssh-mounted
+	(lateci--monte-p "~/Club1"))
 
-  ;; 4. Réseau Async
-  (setq lateci--reseau-online (lateci--network-online-p))
-  
-  ;; 5. Hydroxide Async
-  (make-process
-   :name "hydroxide-check" :buffer nil
-   :command '("pgrep" "-x" "hydroxide")
-   :sentinel (lambda (proc _event)
-               (setq lateci--hydroxide-online (= (process-exit-status proc) 0))
-               (lateci--actualiser-affichage))))
+  (lateci--actualiser-affichage))
+
+(defvar lateci-sondage-intervalle 60
+  "Intervalle, en secondes, entre deux sondages de l'état système.")
+
+(defvar lateci--verifier-systeme-timer nil
+  "Minuteur de sondage système, conservé pour pouvoir être annulé.")
+
+;; Idempotent : `s-r' recharge ce fichier, et sans cette garde chaque
+;; rechargement empilait un minuteur supplémentaire. `M-x list-timers' doit
+;; n'afficher qu'une seule entrée `lateci--verifier-systeme'.
+(when (timerp lateci--verifier-systeme-timer)
+  (cancel-timer lateci--verifier-systeme-timer))
 
 (lateci--verifier-systeme)
-(run-with-timer 0 10 #'lateci--verifier-systeme)
+(setq lateci--verifier-systeme-timer
+      (run-with-timer 0 lateci-sondage-intervalle #'lateci--verifier-systeme))
 
 ;;;; EXWM
 (require 'exwm)
@@ -1032,13 +1122,28 @@
 
 (defun reboot ()
       (interactive)
-      (when (yes-or-no-p "Redématrer l'ordinateur ? ")
+      (when (yes-or-no-p "Redémarrer l'ordinateur ? ")
         (save-some-buffers) ;; Sauvegarde silencieuse de tout ce qui a été modifié
         (start-process "reboot" nil "reboot")))
 
 (defun suspend ()
   (interactive)
   (start-process "suspend" nil "suspend"))
+
+(defun lateci/verrouiller-ecran ()
+  "Verrouille l'écran avec slock.
+Le binaire setuid est fourni par `screen-locker-service-type' (config.scm)."
+  (interactive)
+  (start-process "slock" nil "/run/setuid-programs/slock"))
+
+;;;; Guix
+(defun lateci/guix-pull ()
+  "Lance `guix pull' dans un tampon de compilation.
+Les canaux utilisés sont ceux de ~/.config/guix/channels.scm. La
+reconfiguration du système et du profil Home reste une opération
+délibérée, à lancer séparément."
+  (interactive)
+  (compilation-start "guix pull" nil (lambda (_) "*guix pull*")))
 
 ;;;; EXWM — RACCOURCIS ORGANISÉS ::::::::::::::::::::::::::::::::::::::::::::::
 ;; Quatre familles seulement, toutes sous Super :
@@ -1211,7 +1316,7 @@
     "s-y G"   "verrouiller GPG"
     "s-y m"   "monter club1"
     "s-y M"   "démonter club1"
-    "s-y s"   "synchro活 activer"
+    "s-y s"   "synchro activer"
     "s-y S"   "synchro désactiver"
     "s-y u"   "guix pull"
     "s-y i"   "interface Guix"
@@ -1229,12 +1334,20 @@
     "s-g r"   "réécrire"
     "s-g a"   "ajouter au contexte"
     "s-g x"   "vider le contexte"
-    "s-g s"   "directive"
+    ;; Les touches réelles sont D et G (cf. `lateci-exwm-ia-map' plus haut) ;
+    ;; les étiquettes portaient s et g, cette dernière écrasant en silence
+    ;; celle de « nouvelle session ».
+    "s-g D"   "directive"
     "s-g m"   "modèle"
-    "s-g g"   "modèle par défaut"
+    "s-g G"   "modèle par défaut"
     "s-g ?"   "état"))
 
-(exwm-wm-mode)
+;; LATECI_NO_EXWM=1 permet de charger cette configuration dans un Emacs de
+;; diagnostic, à côté de la session courante, sans tenter de prendre le
+;; contrôle du gestionnaire de fenêtres. Sans effet en usage normal.
+(if (getenv "LATECI_NO_EXWM")
+    (message "LATECI_NO_EXWM : exwm-wm-mode non activé (mode diagnostic).")
+  (exwm-wm-mode))
 
 ;;; INSPIRATION :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
@@ -1391,7 +1504,8 @@
      ("file"     "Relative or absolute path to attachments" "" )))
   (bibtex-align-at-equal-sign t)
   :config
-  (ews-bibtex-register)
+  (when (fboundp 'ews-bibtex-register)
+    (ews-bibtex-register))
   :bind
   (("C-c w b r" . ews-bibtex-register)))
 
@@ -1465,13 +1579,8 @@
 
 (use-package denote-sequence)
 
-;; Consult convenience functions
-(use-package consult
-  :bind
-  (("C-c w h" . consult-org-heading)
-   ("C-c w g" . consult-grep))
-  :config
-  (add-to-list 'consult-preview-allowed-hooks 'visual-line-mode))
+;; Consult est configuré plus haut (section MINIBUFFER COMPLETION), avec en
+;; plus C-x b et la source « Applications X11 » pour les tampons EXWM.
 
 ;; Consult-Notes for easy access to notes
 (use-package consult-notes
@@ -1682,20 +1791,19 @@
   (setq diary-file (expand-file-name "diary" user-emacs-directory))
   (unless (file-exists-p diary-file)
     (with-temp-file diary-file
-      (insert "%%(org-diary)\n")))
-  
-  ;; --- TYPOGRAPHIE ET APPARENCE ---
-  (custom-set-faces
-   '(calendar-today ((t (:weight bold :foreground "white" :background "dark blue"))))
-   '(calendar-weekend-header ((t (:foreground "firebrick"))))
-   '(calendar-month-header ((t (:weight bold :height 1.2))))
-   ;; Apparence des jours marqués (ceux avec des RDV, TODO planifiés, etc.)
-   '(diary ((t (:weight bold :foreground "dark green"))))))
+      (insert "%%(org-diary)\n"))))
+
+;; La typographie du calendrier (calendar-today, calendar-weekend-header,
+;; calendar-month-header, diary) est réglée par `lateci/appliquer-faces'
+;; (section RETOUCHES DE FACES), avec des faces sémantiques au lieu de
+;; couleurs littérales.
 
 ;; --- CORRECTION DE LA GRILLE ---
-(add-hook 'calendar-mode-hook
-          (lambda ()
-            (face-remap-add-relative 'default :family "Monospace")))
+(defun lateci--calendrier-police-fixe ()
+  "Force une police à chasse fixe : la grille du calendrier en dépend."
+  (face-remap-add-relative 'default :family "Monospace"))
+
+(add-hook 'calendar-mode-hook #'lateci--calendrier-police-fixe)
 
 (setq org-read-date-popup-calendar nil)
 
@@ -1788,7 +1896,9 @@
 ;;;; Image viewer
 (use-package emacs
   :custom
-  (image-dired-external-viewer "gimp")
+  ;; « gimp » n'est pas au profil : C-<return> depuis dired échouait.
+  ;; `display' vient d'imagemagick, déjà installé.
+  (image-dired-external-viewer "display")
   :bind
   (:map image-mode-map
          ("k" . image-kill-buffer)
@@ -1863,28 +1973,30 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
 	
 	;; --- Nouveaux Courriels --- 
         '((:name "Nouveau(x) courriel(s) pour la TECI"
-                 :query "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"
+                 :query "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"
                  :key "n")
 	  (:name "Nouveau(x) courriel(s) du Fight-Club"
                  :query "tag:unread AND to:fight-club@framagroupes.org AND NOT tag:trash"
                  :key "c")
 	  (:name "Nouveau(x) courriel(s) du Hangar"
-                 :query "tag:unread AND (to:membres.actif-ves@lestempsdarts.lautre.net OR commission.numerique@lestempsdarts.lautre.net OR actus@lestempsdarts.lautre.net) AND NOT tag:trash"
+                 :query "tag:unread AND (to:membres.actif-ves@lestempsdarts.lautre.net OR to:commission.numerique@lestempsdarts.lautre.net OR to:actus@lestempsdarts.lautre.net) AND NOT tag:trash"
                  :key "h")
 	   (:name "Nouveau(x) courriel(s) perso"
                  :query "tag:unread AND to:thomas.millasseau@protonmail.com AND NOT tag:trash"
                  :key "N")
 	   
-	  ;; --- Boites de recpetion ---	   
+	  ;; --- Boites de réception ---
 	  (:name "Boites de réception de la TECI"
-                 :query "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"
+                 :query "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"
                  :key "p")
 	  (:name "Boite de réception du Fight-Club"
                  :query "tag:inbox AND to:fight-club@framagroupes.org AND NOT tag:trash"
                  :key "f")
+	  ;; "H" et non "h" : cette touche était en collision avec « Nouveau(x)
+	  ;; courriel(s) du Hangar » ci-dessus, rendant cette entrée inatteignable.
 	  (:name "Boite de réception du Hangar"
                  :query "tag:inbox AND (to:membres.actif-ves@lestempsdarts.lautre.net OR to:commission.numerique@lestempsdarts.lautre.net OR to:actus@lestempsdarts.lautre.net) AND NOT tag:trash"
-                 :key "h")	  
+                 :key "H")
           (:name "Boite de réception personnelle"
                  :query "tag:inbox AND to:thomas.millasseau@protonmail.com AND NOT tag:trash"
                  :key "P")
@@ -1988,7 +2100,7 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
          (if (/= (process-exit-status p) 0)
              (lateci--stop-spinner (format "Échec mbsync : %s" (string-trim event)))
            (progn
-             (lateci--stop-spinner "mise à jours des xcourriels terminée !")
+             (lateci--stop-spinner "Mise à jour des courriels terminée !")
              (when (fboundp 'notmuch-poll)
                (notmuch-poll))
              (when (fboundp 'notmuch-hello-update)
@@ -1998,12 +2110,12 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
 (defun notmuch-open-unread-teci ()
   "Ouvre les courriels non lus du Terrain d'Expérimentation de Créations et d'Initiative."
   (interactive)
-  (notmuch-search "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"))
+  (notmuch-search "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"))
 
 (defun notmuch-open-inbox-teci ()
   "Ouvre la boite de réception globale."
   (interactive)
-  (notmuch-search "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"))
+  (notmuch-search "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"))
 
 ;; --- DÉCLARATION DES RACCOURCIS COURRIELS ---
 (defvar lateci-mail-map (make-sparse-keymap)
@@ -2138,13 +2250,17 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
   "Demande à Shepherd de démarrer le service SSHFS."
   (interactive)
   (start-process "shepherd-sshfs-on" nil "herd" "start" "sshfs-club1")
-  (message "Montage de Club1 via Shepherd..."))
+  (message "Montage de Club1 via Shepherd...")
+  ;; Le montage passe par le réseau : on laisse le temps à sshfs d'aboutir
+  ;; avant de rafraîchir l'indicateur « srv ».
+  (run-at-time "3 sec" nil #'lateci--verifier-systeme))
 
 (defun umount-club1 ()
   "Demande à Shepherd d'arrêter le service SSHFS."
   (interactive)
   (start-process "shepherd-sshfs-off" nil "herd" "stop" "sshfs-club1")
-  (message "Démontage de Club1 via Shepherd..."))
+  (message "Démontage de Club1 via Shepherd...")
+  (run-at-time "2 sec" nil #'lateci--verifier-systeme))
 
 (global-set-key (kbd "C-c <f7>") #'mount-club1)
 (global-set-key (kbd "C-c S-<f7>") #'umount-club1)
@@ -2154,6 +2270,11 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
   :defer t
   :custom
   (syncthing-host "127.0.0.1:8384")
+  ;; La lecture du jeton reste ici, donc au démarrage d'Emacs : .bash_profile
+  ;; déverrouille la clé GPG avant startx, elle est en cache, `pass show'
+  ;; répond immédiatement. Différer cet appel le déplacerait vers un moment où
+  ;; le cache peut avoir expiré, et le message d'erreur de gpg finirait dans
+  ;; le jeton lui-même.
   (syncthing-default-server-token
     (string-trim (shell-command-to-string "pass show api/syncthing"))))
 
@@ -2207,7 +2328,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
   (interactive)
   (let ((bin (executable-find "gpgconf")))
     (when (and bin (numberp (call-process bin nil nil nil "--kill" "gpg-agent")))
-      (message "clé gpg est vérouillé")
+      (message "Clé GPG verrouillée.")
       (setq lateci--gpg-unlocked nil)
       (lateci--actualiser-affichage))))
 
@@ -2361,23 +2482,20 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
                 gemini-3.6-flash
                 gemini-3.1-pro-preview)))
 
-  (setq gptel-backend gptel--backend-anthropic
-        gptel-model 'claude-opus-5
-	gptel-cache '(message system tool))
-
-    (defvar gptel--backend-openai
+  (defvar gptel--backend-openai
     (gptel-make-openai "openai"
       :key #'lateci--openai-key
       :stream t
       :models '(gpt-5.6-sol
                 gpt-5.6-terra
-		gpt-5.6-luna)))
+                gpt-5.6-luna)))
 
+  ;; Sélection par défaut, une fois tous les backends déclarés.
   (setq gptel-backend gptel--backend-anthropic
         gptel-model 'claude-opus-5
-	gptel-cache '(message system tool))
+        gptel-cache '(message system tool))
 
-  
+
   ;; --- Outils ---
   (defvar lateci--outil-notes
     (gptel-make-tool
@@ -2689,10 +2807,12 @@ insérée au point plutôt qu'affichée."
   :config
 (setq ledger-master-file lateci-comptabilite-file)
 
-(add-hook 'ledger-mode-hook
-          (lambda ()
-            (when buffer-file-name
-              (setq-local ledger-master-file buffer-file-name))))
+(defun lateci--ledger-master-courant ()
+  "Prend le fichier visité comme journal maître."
+  (when buffer-file-name
+    (setq-local ledger-master-file buffer-file-name)))
+
+(add-hook 'ledger-mode-hook #'lateci--ledger-master-courant)
   :bind
   (:map ledger-mode-map
         ("C-c C-a" . ledger-add-transaction)

@@ -21,6 +21,7 @@
 	 
          ;; --- Bureautique et Média ---
          "ghostscript" "mupdf" "poppler" "imagemagick"
+         "graphviz"                    ; dot, requis par ob-dot (init.el)
          "djvulibre" "zip" "unzip" "pandoc" "fgallery"
          "vorbis-tools" "mpg321" "mpv" "alsa-utils"
 	 "hunspell" "hunspell-dict-fr-toutesvariantes"
@@ -28,13 +29,13 @@
 	 "ledger"
          
          ;; --- Emacs ---
-	 "emacs" "emacs-exwm" "emacs-desktop-environment" "emacs-xelb"
+	 "emacs" "emacs-exwm" "emacs-xelb"
 	 "emacs-biblio" "emacs-citar-denote" "emacs-consult-notes"
-	 "emacs-consult-notmuch" "emacs-darkroom" "emacs-denote-explore"
+	 "emacs-darkroom" "emacs-denote-explore"
 	 "emacs-denote-journal" "emacs-denote-org" "emacs-dictionary"
 	 "emacs-denote-sequence" "emacs-emms" "emacs-helpful" "emacs-marginalia"
 	 "emacs-markdown-mode" "emacs-mixed-pitch"
-	 "emacs-nov" "emacs-orderless" "emacs-org-caldav"
+	 "emacs-nov" "emacs-orderless"
 	 "emacs-org-fragtog" "emacs-org-web-tools" "emacs-ox-epub"
 	 "emacs-pinentry" "emacs-syncthing"
 	 "emacs-vertico" "emacs-vundo" "emacs-writegood-mode"
