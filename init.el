@@ -2,7 +2,11 @@
 ;;; BASE ::::::::::::::::::::::::::::::::::::::::::::::::::::
 (setq server-socket-dir (expand-file-name "server" user-emacs-directory))
 (setenv "EMACS_SOCKET_NAME" (expand-file-name "server" server-socket-dir))
-(server-start)
+;; Idempotent : `s-r' recharge ce fichier, et un Emacs de diagnostic peut être
+;; lancé à côté de la session sans entrer en conflit avec le serveur en place.
+(require 'server)
+(unless (server-running-p)
+  (server-start))
 
 ;;;; Emacs 29 available?
 (when (< emacs-major-version 29)
@@ -16,7 +20,15 @@
 ;;;; Package Management
 (setq use-package-always-ensure nil
       package-native-compile t
-      warning-minimum-level :emergency)
+      ;; On fait taire le bruit de la compilation native, et rien d'autre :
+      ;; `warning-minimum-level' garde son défaut (:warning) pour que
+      ;; *Warnings* reste exploitable au diagnostic.
+      native-comp-async-report-warnings-errors 'silent)
+
+;; Mesure du démarrage, à la demande : LATECI_STATS=1 emacs …
+;; puis M-x use-package-report. Aucun surcoût sinon.
+(setq use-package-compute-statistics (and (getenv "LATECI_STATS") t))
+
 (require 'use-package)
 (require 'org)
 
@@ -47,6 +59,17 @@
            "hunspell"
            "git")))
     (display-warning 'init "Fichier ews.el introuvable. EXWM démarre en mode dégradé (les raccourcis spécifiques EWS généreront des erreurs)." :warning)))
+
+;; Repli, à exécuter APRÈS la tentative de chargement ci-dessus.
+;; `defvar' ne fixe une valeur que si la variable est vide : si ews.el a été
+;; chargé, ces deux formes sont sans effet. Sinon elles évitent une
+;; `void-variable' plus bas (citar, puis org-cite au niveau supérieur), qui
+;; interromprait le chargement en plein milieu du fichier et laisserait
+;; courriel, gptel et comptabilité non chargés, sans aucun message.
+(defvar ews-bibtex-files nil
+  "Repli lorsque ews.el est absent : aucune bibliographie.")
+(defvar ews-bibtex-directory nil
+  "Repli lorsque ews.el est absent.")
 
 ;;;; Org-mode
 (use-package org
@@ -1234,7 +1257,12 @@
     "s-g g"   "modèle par défaut"
     "s-g ?"   "état"))
 
-(exwm-wm-mode)
+;; LATECI_NO_EXWM=1 permet de charger cette configuration dans un Emacs de
+;; diagnostic, à côté de la session courante, sans tenter de prendre le
+;; contrôle du gestionnaire de fenêtres. Sans effet en usage normal.
+(if (getenv "LATECI_NO_EXWM")
+    (message "LATECI_NO_EXWM : exwm-wm-mode non activé (mode diagnostic).")
+  (exwm-wm-mode))
 
 ;;; INSPIRATION :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
@@ -1391,7 +1419,8 @@
      ("file"     "Relative or absolute path to attachments" "" )))
   (bibtex-align-at-equal-sign t)
   :config
-  (ews-bibtex-register)
+  (when (fboundp 'ews-bibtex-register)
+    (ews-bibtex-register))
   :bind
   (("C-c w b r" . ews-bibtex-register)))
 
