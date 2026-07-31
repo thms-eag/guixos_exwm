@@ -2762,7 +2762,8 @@ insérée au point plutôt qu'affichée."
     ("v" "une variable…"        helpful-variable)]
    ["Cette configuration"
     ("c" "la carte des raccourcis"  usr-carte-raccourcis)
-    ("t" "les touches matérielles"  usr-touches-materielles)]])
+    ("t" "les touches matérielles"  usr-touches-materielles)
+    ("V" "vérifier les touches"     usr-touches-verifier)]])
 
 (transient-define-prefix usr-menu ()
   "Menu principal de la session."
@@ -2962,6 +2963,60 @@ Sert aussi de source à `usr-touches-materielles'.")
 
 (dolist (paire usr--touches-declarees)
   (usr--lier-touche (car paire) (cdr paire)))
+
+;; Ces déclarations arrivent bien après (exwm-wm-mode), qui démarre EXWM en
+;; début de fichier. Selon la version, `exwm-input-set-key' ne redemande pas
+;; toujours la capture des touches au serveur X pour une session déjà lancée :
+;; sans nouvelle prise, la touche part au client X11 au lieu de remonter à
+;; Emacs. On redemande donc explicitement la prise.
+(dolist (fonction '(exwm-input--update-global-prefix-keys
+                    exwm-input--update-global-keys))
+  (when (and (fboundp fonction) (bound-and-true-p exwm--connection))
+    (ignore-errors (funcall fonction))))
+
+;; Filet complémentaire : la table du mode majeur est consultée avant la table
+;; globale. Déclarer aussi les touches Super dans `exwm-mode-map' garantit
+;; qu'elles agissent depuis un tampon X11, y compris en mode ligne.
+(with-eval-after-load 'exwm
+  (dolist (paire usr--touches-declarees)
+    (when (string-prefix-p "s-" (car paire))
+      (ignore-errors
+        (keymap-set exwm-mode-map (car paire) (cdr paire))))))
+
+(defun usr-touches-verifier ()
+  "Vérifie que chaque touche déclarée est bien vue par Emacs et par EXWM.
+Une touche « globale non » signale que le lien Emacs manque ; une touche
+« EXWM non » signale que le serveur X ne la remonte pas à Emacs et
+l'envoie au client X11 à la place."
+  (interactive)
+  (let ((prises (or (bound-and-true-p exwm-input--global-prefix-keys)
+                    (bound-and-true-p exwm-input--global-keys))))
+    (with-current-buffer (get-buffer-create "*vérification des touches*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (org-mode)
+        (insert "#+TITLE: Vérification des touches\n#+OPTIONS: toc:nil\n\n"
+                "| touche | commande | globale | EXWM | mode EXWM |\n"
+                "|--------+----------+---------+------+-----------|\n")
+        (dolist (paire usr--touches-declarees)
+          (let* ((touche (car paire))
+                 (attendue (cdr paire))
+                 (sequence (kbd touche))
+                 (globale (eq (lookup-key (current-global-map) sequence) attendue))
+                 (dans-exwm (and prises (member sequence prises) t))
+                 (dans-map (and (boundp 'exwm-mode-map)
+                                (eq (lookup-key exwm-mode-map sequence) attendue))))
+            (insert (format "| %s | %s | %s | %s | %s |\n"
+                            touche attendue
+                            (if globale "oui" "NON")
+                            (if dans-exwm "oui" "NON")
+                            (if dans-map "oui" "non")))))
+        (insert "\n"
+                "Une touche dont la colonne EXWM vaut NON n'est pas capturée au\n"
+                "serveur X : elle atteindra Emacs depuis un tampon Emacs, mais\n"
+                "partira dans IceCat ou XTerm depuis un tampon X11.\n")
+        (goto-char (point-min))))
+    (pop-to-buffer "*vérification des touches*")))
 
 ;; Porte de secours quand la touche Super n'est pas disponible : Emacs en
 ;; terminal, emacsclient hors session X, machine distante.
