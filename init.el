@@ -608,33 +608,98 @@
 ;;(add-to-list 'default-frame-alist '(internal-border-width . 15))
 ;;(modify-all-frames-parameters '((internal-border-width . 15)))
 
-;; Appliquer les couleurs une fois le thème Modus chargé
-(with-eval-after-load 'modus-themes
-  
-  ;; 1. Trait séparant les fenêtres (vertical-border)
-  ;; Ici, il prend la couleur du fond pour devenir invisible. 
-  ;; Si tu veux une ligne visible fine, remplace `(face-attribute 'default :background)` par `"grey50"`
-  (set-face-attribute 'vertical-border nil 
-                      :foreground (face-attribute 'default :background))
-
-  ;; 2. Couleur de la marge globale autour de l'écran
-  (set-face-attribute 'internal-border nil 
-                      :background (face-attribute 'default :background)))
-
 ;; Activer des espaces vides entre les fenêtres
 (setq window-divider-default-right-width 10   ;; Espace vertical entre fenêtres côte à côte
       window-divider-default-bottom-width 10) ;; Espace horizontal entre fenêtres superposées
 (window-divider-mode 1)
 
-;; Rendre ces espaces de la couleur du fond d'écran
-(with-eval-after-load 'modus-themes
-  (set-face-attribute 'window-divider nil :foreground (face-attribute 'default :background))
-  (set-face-attribute 'window-divider-first-pixel nil :foreground (face-attribute 'default :background))
-  (set-face-attribute 'window-divider-last-pixel nil :foreground (face-attribute 'default :background)))
+;;;; RETOUCHES DE FACES ::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+;;
+;; `set-face-attribute' modifie une face directement, en dehors de tout thème.
+;; Or `enable-theme' recalcule chaque face à partir de sa spécification, ce qui
+;; efface ces retouches — y compris les attributs que le thème ne touche pas,
+;; comme la taille de police. Sans le crochet installé plus bas, tout ce bloc
+;; était donc perdu au premier `C-c w t t' : police rétrécie, séparateurs
+;; redevenus visibles, modeline inactive au fond clair sur thème sombre,
+;; hiérarchie des titres Org aplatie.
+;;
+;; Les couleurs sont relues à chaque passage (`fond' ci-dessous), et le
+;; calendrier hérite de faces sémantiques plutôt que de couleurs littérales :
+;; l'ensemble suit donc le thème actif, clair comme sombre.
 
-;;;; Augmenter la taille de police globale
-(set-face-attribute 'default nil
-		    :height 120)
+(defun lateci--set-face (face &rest attributs)
+  "Applique ATTRIBUTS à FACE, si FACE existe.
+La garde évite d'échouer sur les faces d'un paquet non encore chargé."
+  (when (facep face)
+    (apply #'set-face-attribute face nil attributs)))
+
+(defun lateci/appliquer-faces (&rest _)
+  "Applique les retouches de faces propres à cette configuration.
+Rejouée à chaque activation de thème via `enable-theme-functions'."
+  (let ((fond (face-attribute 'default :background)))
+
+    ;; --- Taille de police globale ---
+    (lateci--set-face 'default :height 120)
+
+    ;; --- Séparateurs fondus dans le fond ---
+    ;; Pour une ligne fine visible, remplacer `fond' par "grey50".
+    (lateci--set-face 'vertical-border :foreground fond)
+    (lateci--set-face 'internal-border :background fond)
+    (dolist (face '(window-divider
+                    window-divider-first-pixel
+                    window-divider-last-pixel))
+      (lateci--set-face face :foreground fond))
+
+    ;; --- Modeline ---
+    ;; mode-line-active est le paramètre distinct d'Emacs 29+ ; mode-line reste
+    ;; réglée pour les faces qui en héritent.
+    (lateci--set-face 'mode-line :height 0.90)
+    (lateci--set-face 'mode-line-active :height 0.90)
+    ;; Modeline inactive masquée : texte et fond à la couleur du fond d'Emacs.
+    (lateci--set-face 'mode-line-inactive
+                      :foreground fond
+                      :background fond
+                      :box nil
+                      :overline nil
+                      :underline nil)
+
+    ;; --- Org : hiérarchie des titres ---
+    (lateci--set-face 'org-document-title :height 1.5  :weight 'bold)
+    (lateci--set-face 'org-level-1        :height 1.3  :weight 'bold)
+    (lateci--set-face 'org-level-2        :height 1.2  :weight 'bold)
+    (lateci--set-face 'org-level-3        :height 1.1  :weight 'semi-bold)
+    (lateci--set-face 'org-level-4        :height 1.05)
+    (lateci--set-face 'org-level-5        :height 1.0)
+    (lateci--set-face 'org-level-6        :height 1.0)
+
+    ;; --- Org : étiquettes et horodatages ---
+    (lateci--set-face 'org-tag
+                      :box '(:line-width 1 :color "grey50")
+                      :height 0.8
+                      :weight 'normal)
+    (lateci--set-face 'org-date
+                      :box '(:line-width 1 :color "grey70")
+                      :underline nil)
+
+    ;; --- Calendrier ---
+    ;; `:inherit' de faces sémantiques (highlight, error, success) plutôt que
+    ;; des couleurs littérales : elles suivent le thème. L'ancienne version
+    ;; codait « white sur dark blue » et « firebrick », illisibles en sombre.
+    (lateci--set-face 'calendar-today :inherit 'highlight :weight 'bold)
+    (lateci--set-face 'calendar-weekend-header :inherit 'error)
+    (lateci--set-face 'calendar-month-header :weight 'bold :height 1.2)
+    (lateci--set-face 'diary :inherit 'success :weight 'bold)))
+
+;; Rejouée à chaque activation de thème (Emacs 29+).
+(add-hook 'enable-theme-functions #'lateci/appliquer-faces)
+
+;; Les faces du calendrier n'existent qu'une fois leur paquet chargé : on
+;; rejoue alors la fonction pour qu'elles ne soient pas laissées de côté.
+(with-eval-after-load 'calendar (lateci/appliquer-faces))
+(with-eval-after-load 'diary-lib (lateci/appliquer-faces))
+
+;; Application initiale : le thème est chargé plus haut.
+(lateci/appliquer-faces)
 
 ;;;; Short answers only please
 (setq-default use-short-answers t)
@@ -814,26 +879,14 @@
   (setq org-format-latex-options (plist-put org-format-latex-options :foreground 'auto))
   (setq org-format-latex-options (plist-put org-format-latex-options :background 'auto)))
 
-;; Tailles des headings (à ajuster selon ton goût / police)
-(with-eval-after-load 'org
-  (set-face-attribute 'org-document-title nil
-                      :height 1.5 :weight 'bold)
-  (set-face-attribute 'org-level-1 nil
-                      :height 1.3 :weight 'bold)
-  (set-face-attribute 'org-level-2 nil
-                      :height 1.2 :weight 'bold)
-  (set-face-attribute 'org-level-3 nil
-                      :height 1.1 :weight 'semi-bold)
-  (set-face-attribute 'org-level-4 nil
-                      :height 1.05)
-  (set-face-attribute 'org-level-5 nil
-                      :height 1.0)
-  (set-face-attribute 'org-level-6 nil
-                      :height 1.0))
+;; Les tailles des titres Org, org-tag et org-date sont réglées par
+;; `lateci/appliquer-faces' (section RETOUCHES DE FACES), afin d'être
+;; réappliquées à chaque changement de thème.
 
 (with-eval-after-load 'org
-  ;; 1. Les mots-clés TODO en mode "bouton"
-  ;; J'ai repris ta liste exacte de mots-clés pour leur assigner une couleur et une boîte
+  ;; Les mots-clés TODO en mode "bouton".
+  ;; `org-todo-keyword-faces' est une variable, pas une face : son contenu
+  ;; survit au changement de thème, d'où son maintien ici.
   (setq org-todo-keyword-faces
         '(("TODO"   . (:foreground "firebrick"   :weight bold :box (:line-width 1 :style released-button)))
           ("NEXT"   . (:foreground "royalblue"   :weight bold :box (:line-width 1 :style released-button)))
@@ -843,19 +896,7 @@
           ("PRATOS" . (:foreground "dark cyan"   :weight bold :box (:line-width 1 :style released-button)))
           ("EVNT"   . (:foreground "goldenrod"   :weight bold :box (:line-width 1 :style released-button)))
           ("DONE"   . (:foreground "forest green" :weight bold :strike-through t))
-          ("CANCELLED" . (:foreground "grey"     :weight bold :strike-through t))))
-
-  ;; 2. Les Tags encapsulés dans une boîte discrète
-  ;; On réduit légèrement la taille de la police (:height 0.8) pour accentuer l'effet étiquette
-  (set-face-attribute 'org-tag nil
-                      :box '(:line-width 1 :color "grey50")
-                      :height 0.8
-                      :weight 'normal)
-
-  ;; 3. Les Dates et horodatages
-  (set-face-attribute 'org-date nil
-                      :box '(:line-width 1 :color "grey70")
-                      :underline nil))
+          ("CANCELLED" . (:foreground "grey"     :weight bold :strike-through t)))))
 
 
 ;;;; MODELINE
@@ -866,23 +907,9 @@
     ;; 2. On applique la réduction de manière fixe
     (face-remap-add-relative 'default :height 0.90)))
 
-;; Réduire la taille de la modeline de 20% par rapport à la police par défaut
-;; Face de base (par sécurité pour les héritages)
-(set-face-attribute 'mode-line nil :height 0.90)
-
-;; Fenêtre active (le paramètre manquant pour Emacs 29+)
-(set-face-attribute 'mode-line-active nil :height 0.90)
-
-;; Masquer la modeline inactive en fusionnant ses couleurs avec le fond par défaut
-(set-face-attribute 'mode-line-inactive nil
-                    ;; Le texte prend la couleur du fond d'Emacs
-                    :foreground (face-attribute 'default :background)
-                    ;; Le fond de la modeline prend la couleur du fond d'Emacs
-                    :background (face-attribute 'default :background)
-                    ;; Supprimer les bordures ou ombres éventuelles
-                    :box nil
-                    :overline nil
-                    :underline nil)
+;; Les faces mode-line, mode-line-active et mode-line-inactive sont réglées par
+;; `lateci/appliquer-faces' (section RETOUCHES DE FACES) : leur couleur dépend
+;; du fond, qui change avec le thème.
 
 (use-package time
   :ensure nil
@@ -1749,15 +1776,12 @@ délibérée, à lancer séparément."
   (setq diary-file (expand-file-name "diary" user-emacs-directory))
   (unless (file-exists-p diary-file)
     (with-temp-file diary-file
-      (insert "%%(org-diary)\n")))
-  
-  ;; --- TYPOGRAPHIE ET APPARENCE ---
-  (custom-set-faces
-   '(calendar-today ((t (:weight bold :foreground "white" :background "dark blue"))))
-   '(calendar-weekend-header ((t (:foreground "firebrick"))))
-   '(calendar-month-header ((t (:weight bold :height 1.2))))
-   ;; Apparence des jours marqués (ceux avec des RDV, TODO planifiés, etc.)
-   '(diary ((t (:weight bold :foreground "dark green"))))))
+      (insert "%%(org-diary)\n"))))
+
+;; La typographie du calendrier (calendar-today, calendar-weekend-header,
+;; calendar-month-header, diary) est réglée par `lateci/appliquer-faces'
+;; (section RETOUCHES DE FACES), avec des faces sémantiques au lieu de
+;; couleurs littérales.
 
 ;; --- CORRECTION DE LA GRILLE ---
 (defun lateci--calendrier-police-fixe ()
