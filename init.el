@@ -2575,7 +2575,8 @@ insérée au point plutôt qu'affichée."
     ("c" "capture…"            org-capture)
     ("t" "nouvelle tâche"      usr-tache-todo)
     ("n" "action suivante"     usr-tache-suivante)
-    ("r" "rendez-vous"         usr-rendez-vous)]
+    ("r" "rendez-vous"         usr-rendez-vous)
+    ("v" usr-note-vocale :description usr--note-vocale-description)]
    ["Dates"
     ("k" "calendrier"          calendar)
     ("l" "insérer un lien"     org-store-link)]])
@@ -2794,6 +2795,127 @@ monté un partage, sans attendre le prochain sondage périodique."
   (usr--verifier-systeme)
   (message "État système actualisé."))
 
+;;;; --- Note vocale ----------------------------------------------------------
+;; Un appui démarre l'enregistrement, un second l'arrête. Le WAV brut est
+;; capté par arecord (alsa-utils) puis compressé en Ogg Vorbis par oggenc
+;; (vorbis-tools) — les deux sont déjà déclarés dans home.scm.
+;;
+;; L'enregistrement passe par un fichier WAV plutôt que par un tube vers
+;; oggenc : le processus arecord est alors seul, donc réellement
+;; interruptible, et il finalise l'en-tête WAV en recevant SIGINT.
+
+(defvar usr-note-vocale-repertoire "~/Bureau/"
+  "Répertoire où déposer les notes vocales (la base Denote).")
+
+(defvar usr--note-vocale-processus nil)
+(defvar usr--note-vocale-wav nil)
+(defvar usr--note-vocale-ogg nil)
+(defvar usr--note-vocale-debut nil)
+(defvar usr--note-vocale-horloge nil)
+(defvar usr--note-vocale-temoin " ")
+
+(or global-mode-string (setq global-mode-string '("")))
+(unless (memq 'usr--note-vocale-temoin global-mode-string)
+  (setq global-mode-string (append global-mode-string '(usr--note-vocale-temoin))))
+
+(defun usr--note-vocale-chemin (titre extension)
+  "Chemin au format Denote pour TITRE avec EXTENSION."
+  (let ((limace (replace-regexp-in-string
+                 "\\`-\\|-\\'" ""
+                 (replace-regexp-in-string
+                  "[^[:alnum:]]+" "-" (downcase titre)))))
+    (expand-file-name
+     (format "%s--%s__audio_note.%s"
+             (format-time-string "%Y%m%dT%H%M%S")
+             (if (string-empty-p limace) "note-vocale" limace)
+             extension)
+     usr-note-vocale-repertoire)))
+
+(defun usr--note-vocale-tic ()
+  "Met à jour le témoin de durée dans la modeline."
+  (setq usr--note-vocale-temoin
+        (format "[● %s] "
+                (format-seconds "%m:%02s"
+                                (float-time (time-since usr--note-vocale-debut)))))
+  (force-mode-line-update t))
+
+(defun usr--note-vocale-temoin-effacer ()
+  (when usr--note-vocale-horloge
+    (cancel-timer usr--note-vocale-horloge)
+    (setq usr--note-vocale-horloge nil))
+  (setq usr--note-vocale-temoin " ")
+  (force-mode-line-update t))
+
+(defun usr--note-vocale-demarrer (titre)
+  "Lance l'enregistrement d'une note vocale intitulée TITRE."
+  (unless (executable-find "arecord")
+    (user-error "arecord est introuvable (paquet alsa-utils)"))
+  (make-directory (expand-file-name usr-note-vocale-repertoire) t)
+  (setq usr--note-vocale-wav (usr--note-vocale-chemin titre "wav")
+        usr--note-vocale-ogg (usr--note-vocale-chemin titre "ogg")
+        usr--note-vocale-debut (current-time)
+        usr--note-vocale-processus
+        (make-process
+         :name "note-vocale" :buffer " *note-vocale*" :noquery t
+         :command (list "arecord" "-f" "cd" "-t" "wav" usr--note-vocale-wav)))
+  (setq usr--note-vocale-horloge
+        (run-at-time 0 1 #'usr--note-vocale-tic))
+  (message "Note vocale : enregistrement en cours (même touche pour arrêter)"))
+
+(defun usr--note-vocale-encoder (wav ogg)
+  "Compresse WAV en OGG puis supprime WAV, ou conserve WAV si l'encodage échoue."
+  (if (not (executable-find "oggenc"))
+      (message "Note vocale conservée en WAV : %s (oggenc introuvable)"
+               (file-name-nondirectory wav))
+    (make-process
+     :name "note-vocale-encodage" :buffer " *note-vocale*" :noquery t
+     :command (list "oggenc" "-Q" "-o" ogg wav)
+     :sentinel
+     (lambda (proc _evenement)
+       (when (memq (process-status proc) '(exit signal))
+         (if (zerop (process-exit-status proc))
+             (progn (ignore-errors (delete-file wav))
+                    (message "Note vocale : %s" (file-name-nondirectory ogg)))
+           (message "Note vocale : encodage échoué, WAV conservé (%s)"
+                    (file-name-nondirectory wav))))))))
+
+(defun usr--note-vocale-arreter ()
+  "Arrête l'enregistrement en cours et lance la compression."
+  (when (process-live-p usr--note-vocale-processus)
+    ;; SIGINT plutôt que SIGKILL : arecord écrit alors la taille réelle
+    ;; dans l'en-tête WAV avant de rendre la main.
+    (interrupt-process usr--note-vocale-processus))
+  (setq usr--note-vocale-processus nil)
+  (usr--note-vocale-temoin-effacer)
+  (let ((wav usr--note-vocale-wav)
+        (ogg usr--note-vocale-ogg))
+    (run-at-time
+     "0.4 sec" nil
+     (lambda ()
+       (if (or (not (file-exists-p wav)) (< (file-attribute-size
+                                             (file-attributes wav)) 1000))
+           (progn (ignore-errors (delete-file wav))
+                  (message "Note vocale : enregistrement trop court, rien conservé"))
+         (usr--note-vocale-encoder wav ogg))))))
+
+(defun usr-note-vocale (&optional titre)
+  "Démarre ou arrête l'enregistrement d'une note vocale.
+Le fichier est déposé dans `usr-note-vocale-repertoire' au format
+Denote, mot-clé « audio_note ». Avec un argument préfixe, demande un
+titre ; sinon la note s'appelle simplement « note vocale »."
+  (interactive
+   (list (when (and current-prefix-arg (not usr--note-vocale-processus))
+           (read-string "Titre de la note vocale : "))))
+  (if usr--note-vocale-processus
+      (usr--note-vocale-arreter)
+    (usr--note-vocale-demarrer (or titre "note vocale"))))
+
+(defun usr--note-vocale-description ()
+  "Libellé du menu, indiquant l'enregistrement en cours le cas échéant."
+  (if usr--note-vocale-processus
+      "arrêter la note vocale"
+    "note vocale"))
+
 ;;;; --- Touches directes -----------------------------------------------------
 
 (defun usr--lier-touche (touche commande)
@@ -2832,7 +2954,9 @@ Une touche absente du clavier est simplement ignorée."
     ("<XF86Display>"           . exwm-layout-toggle-fullscreen)
     ;; La touche « sans-fil » rafraîchit les témoins réseau de la modeline
     ;; plutôt que de couper la radio : c'est l'usage réellement utile ici.
-    ("<XF86WLAN>"              . usr-etat-actualiser))
+    ("<XF86WLAN>"              . usr-etat-actualiser)
+    ;; La touche « micro » démarre et arrête une note vocale.
+    ("<XF86AudioMicMute>"      . usr-note-vocale))
   "Touches globales déclarées, sous forme (TOUCHE . COMMANDE).
 Sert aussi de source à `usr-touches-materielles'.")
 
