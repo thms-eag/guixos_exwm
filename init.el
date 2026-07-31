@@ -2,23 +2,25 @@
 ;;; BASE ::::::::::::::::::::::::::::::::::::::::::::::::::::
 (setq server-socket-dir (expand-file-name "server" user-emacs-directory))
 (setenv "EMACS_SOCKET_NAME" (expand-file-name "server" server-socket-dir))
-(server-start)
+(require 'server)
+(unless (server-running-p)
+  (server-start))
 
 ;;;; Emacs 29 available?
 (when (< emacs-major-version 29)
   (error "Emacs Writing Studio requires version 29 or later"))
 
-;; Synchronise le kill-ring avec le CLIPBOARD X11
+;;Synchronise le kill-ring avec le CLIPBOARD X11
 (setq select-enable-clipboard t)
-;; Synchronise le kill-ring avec la sélection PRIMARY X11
+;;Synchronise le kill-ring avec la sélection PRIMARY X11
 (setq select-enable-primary t)
 
 ;;;; Package Management
 (setq use-package-always-ensure nil
       package-native-compile t
-      warning-minimum-level :emergency)
+      native-comp-async-report-warnings-errors 'silent)
+(setq use-package-compute-statistics (and (getenv "LATECI_STATS") t))
 (require 'use-package)
-(require 'org)
 
 ;;;; Optimisation du Garbage Collector (GCMH)
 (use-package gcmh
@@ -48,9 +50,16 @@
            "git")))
     (display-warning 'init "Fichier ews.el introuvable. EXWM démarre en mode dégradé (les raccourcis spécifiques EWS généreront des erreurs)." :warning)))
 
+
+(defvar ews-bibtex-files nil
+  "Repli lorsque ews.el est absent : aucune bibliographie.")
+(defvar ews-bibtex-directory nil
+  "Repli lorsque ews.el est absent.")
+
+
 ;;;; Org-mode
 (use-package org
-  :ensure t
+  :ensure nil
   :demand t
   
   :init
@@ -545,7 +554,7 @@
 (use-package modus-themes
   :ensure nil
   :init
-  (mapc #'disable-theme custom-enabled-themes)
+  (mapc #'disable-theme (copy-sequence custom-enabled-themes))
   (load-theme 'modus-operandi t)
   
   :custom
@@ -562,37 +571,83 @@
 
 (set-fringe-mode 0) ;; Supprime les bandes grises sur les bords de l'écran
 
-;; Marge globale autour de l'écran (remplace 15 par 0 si tu ne veux AUCUN espace avec les bords de l'écran)
-;;(add-to-list 'default-frame-alist '(internal-border-width . 15))
-;;(modify-all-frames-parameters '((internal-border-width . 15)))
-
-;; Appliquer les couleurs une fois le thème Modus chargé
-(with-eval-after-load 'modus-themes
-  
-  ;; 1. Trait séparant les fenêtres (vertical-border)
-  ;; Ici, il prend la couleur du fond pour devenir invisible. 
-  ;; Si tu veux une ligne visible fine, remplace `(face-attribute 'default :background)` par `"grey50"`
-  (set-face-attribute 'vertical-border nil 
-                      :foreground (face-attribute 'default :background))
-
-  ;; 2. Couleur de la marge globale autour de l'écran
-  (set-face-attribute 'internal-border nil 
-                      :background (face-attribute 'default :background)))
-
-;; Activer des espaces vides entre les fenêtres
 (setq window-divider-default-right-width 10   ;; Espace vertical entre fenêtres côte à côte
       window-divider-default-bottom-width 10) ;; Espace horizontal entre fenêtres superposées
 (window-divider-mode 1)
 
-;; Rendre ces espaces de la couleur du fond d'écran
-(with-eval-after-load 'modus-themes
-  (set-face-attribute 'window-divider nil :foreground (face-attribute 'default :background))
-  (set-face-attribute 'window-divider-first-pixel nil :foreground (face-attribute 'default :background))
-  (set-face-attribute 'window-divider-last-pixel nil :foreground (face-attribute 'default :background)))
+(defun usr--set-face (face &rest attributs)
+  "Applique ATTRIBUTS à FACE, si FACE existe.
+La garde évite d'échouer sur les faces d'un paquet non encore chargé."
+  (when (facep face)
+    (apply #'set-face-attribute face nil attributs)))
 
-;;;; Augmenter la taille de police globale
-(set-face-attribute 'default nil
-		    :height 120)
+(defun usr-appliquer-faces (&rest _)
+  "Applique les retouches de faces propres à cette configuration.
+Rejouée à chaque activation de thème via `enable-theme-functions'."
+  (let ((fond (face-attribute 'default :background)))
+
+    ;; --- Taille de police globale ---
+    (usr--set-face 'default :height 120)
+
+    ;; --- Séparateurs fondus dans le fond ---
+    ;; Pour une ligne fine visible, remplacer `fond' par "grey50".
+    (usr--set-face 'vertical-border :foreground fond)
+    (usr--set-face 'internal-border :background fond)
+    (dolist (face '(window-divider
+                    window-divider-first-pixel
+                    window-divider-last-pixel))
+      (usr--set-face face :foreground fond))
+
+    ;; --- Modeline ---
+    ;; mode-line-active est le paramètre distinct d'Emacs 29+ ; mode-line reste
+    ;; réglée pour les faces qui en héritent.
+    (usr--set-face 'mode-line :height 0.90)
+    (usr--set-face 'mode-line-active :height 0.90)
+    ;; Modeline inactive masquée : texte et fond à la couleur du fond d'Emacs.
+    (usr--set-face 'mode-line-inactive
+                      :foreground fond
+                      :background fond
+                      :box nil
+                      :overline nil
+                      :underline nil)
+
+    ;; --- Org : hiérarchie des titres ---
+    (usr--set-face 'org-document-title :height 1.5  :weight 'bold)
+    (usr--set-face 'org-level-1        :height 1.3  :weight 'bold)
+    (usr--set-face 'org-level-2        :height 1.2  :weight 'bold)
+    (usr--set-face 'org-level-3        :height 1.1  :weight 'semi-bold)
+    (usr--set-face 'org-level-4        :height 1.05)
+    (usr--set-face 'org-level-5        :height 1.0)
+    (usr--set-face 'org-level-6        :height 1.0)
+
+    ;; --- Org : étiquettes et horodatages ---
+    (usr--set-face 'org-tag
+                      :box '(:line-width 1 :color "grey50")
+                      :height 0.8
+                      :weight 'normal)
+    (usr--set-face 'org-date
+                      :box '(:line-width 1 :color "grey70")
+                      :underline nil)
+
+    ;; --- Calendrier ---
+    ;; `:inherit' de faces sémantiques (highlight, error, success) plutôt que
+    ;; des couleurs littérales : elles suivent le thème. L'ancienne version
+    ;; codait « white sur dark blue » et « firebrick », illisibles en sombre.
+    (usr--set-face 'calendar-today :inherit 'highlight :weight 'bold)
+    (usr--set-face 'calendar-weekend-header :inherit 'error)
+    (usr--set-face 'calendar-month-header :weight 'bold :height 1.2)
+    (usr--set-face 'diary :inherit 'success :weight 'bold)))
+
+;; Rejouée à chaque activation de thème (Emacs 29+).
+(add-hook 'enable-theme-functions #'usr-appliquer-faces)
+
+;; Les faces du calendrier n'existent qu'une fois leur paquet chargé : on
+;; rejoue alors la fonction pour qu'elles ne soient pas laissées de côté.
+(with-eval-after-load 'calendar (usr-appliquer-faces))
+(with-eval-after-load 'diary-lib (usr-appliquer-faces))
+
+;; Application initiale : le thème est chargé plus haut.
+(usr-appliquer-faces)
 
 ;;;; Short answers only please
 (setq-default use-short-answers t)
@@ -601,19 +656,23 @@
 (setq inhibit-startup-screen t)
 (setq initial-buffer-choice (lambda () (get-buffer "*Messages*")))
 
-(add-hook 'emacs-startup-hook
-          (lambda ()
-            (when (get-buffer "*scratch*")
-              (kill-buffer "*scratch*"))))
+(defun usr--tuer-scratch ()
+  "Supprime le tampon *scratch* au démarrage."
+  (when (get-buffer "*scratch*")
+    (kill-buffer "*scratch*")))
 
-(add-hook 'kill-buffer-hook
-          (lambda ()
-            (unless (seq-some (lambda (buf)
-                                (let ((name (buffer-name buf)))
-                                  (and (not (string-prefix-p " " name))
-                                       (not (eq buf (current-buffer))))))
-                              (buffer-list))
-              (switch-to-buffer "*Messages*"))))
+(add-hook 'emacs-startup-hook #'usr--tuer-scratch)
+
+(defun usr--garder-un-tampon ()
+  "Bascule sur *Messages* lorsque le dernier tampon visible est tué."
+  (unless (seq-some (lambda (buf)
+                      (let ((name (buffer-name buf)))
+                        (and (not (string-prefix-p " " name))
+                             (not (eq buf (current-buffer))))))
+                    (buffer-list))
+    (switch-to-buffer "*Messages*")))
+
+(add-hook 'kill-buffer-hook #'usr--garder-un-tampon)
 
 ;;;; Mixed-pitch mode
 (use-package mixed-pitch
@@ -681,9 +740,6 @@
   :config
   (which-key-mode)
   :custom
-  ;; NB : la variable s'appelle bien `which-key-max-description-length'.
-  ;; L'ancienne configuration écrivait `which-key-max-iption-length', qui
-  ;; n'existe pas — le réglage n'avait donc aucun effet.
   (which-key-max-description-length 40)
   (which-key-lighter nil)
   ;; Tri par touche et non par description : les préfixes ne sont plus
@@ -741,7 +797,9 @@
   (ispell-set-spellchecker-params)
   (ispell-hunspell-add-multi-dic ews-hunspell-dictionaries)
   :hook
-  (text-mode . flyspell-mode)
+  ((org-mode . flyspell-mode)
+   (message-mode . flyspell-mode)
+   (notmuch-message-mode . flyspell-mode))
   :bind
   (("C-;" . flyspell-auto-correct-previous-word)))
 
@@ -752,31 +810,16 @@
   (org-mode . org-fragtog-mode)
   :custom
   (org-startup-with-latex-preview nil)
-  (org-format-latex-options
-   (plist-put org-format-latex-options :scale 2)
-   (plist-put org-format-latex-options :foreground 'auto)
-   (plist-put org-format-latex-options :background 'auto)))
-
-;; Tailles des headings (à ajuster selon ton goût / police)
-(with-eval-after-load 'org
-  (set-face-attribute 'org-document-title nil
-                      :height 1.5 :weight 'bold)
-  (set-face-attribute 'org-level-1 nil
-                      :height 1.3 :weight 'bold)
-  (set-face-attribute 'org-level-2 nil
-                      :height 1.2 :weight 'bold)
-  (set-face-attribute 'org-level-3 nil
-                      :height 1.1 :weight 'semi-bold)
-  (set-face-attribute 'org-level-4 nil
-                      :height 1.05)
-  (set-face-attribute 'org-level-5 nil
-                      :height 1.0)
-  (set-face-attribute 'org-level-6 nil
-                      :height 1.0))
+  :config
+  ;; `:custom' attend (VARIABLE VALEUR [COMMENTAIRE]) : au-delà du 3e élément
+  ;; tout est ignoré. Les trois plist-put y étaient donc lus comme
+  ;; « valeur + commentaire + rebut », et seul :scale était appliqué —
+  ;; les aperçus LaTeX gardaient des couleurs fixes en thème sombre.
+  (setq org-format-latex-options (plist-put org-format-latex-options :scale 2))
+  (setq org-format-latex-options (plist-put org-format-latex-options :foreground 'auto))
+  (setq org-format-latex-options (plist-put org-format-latex-options :background 'auto)))
 
 (with-eval-after-load 'org
-  ;; 1. Les mots-clés TODO en mode "bouton"
-  ;; J'ai repris ta liste exacte de mots-clés pour leur assigner une couleur et une boîte
   (setq org-todo-keyword-faces
         '(("TODO"   . (:foreground "firebrick"   :weight bold :box (:line-width 1 :style released-button)))
           ("NEXT"   . (:foreground "royalblue"   :weight bold :box (:line-width 1 :style released-button)))
@@ -786,20 +829,7 @@
           ("PRATOS" . (:foreground "dark cyan"   :weight bold :box (:line-width 1 :style released-button)))
           ("EVNT"   . (:foreground "goldenrod"   :weight bold :box (:line-width 1 :style released-button)))
           ("DONE"   . (:foreground "forest green" :weight bold :strike-through t))
-          ("CANCELLED" . (:foreground "grey"     :weight bold :strike-through t))))
-
-  ;; 2. Les Tags encapsulés dans une boîte discrète
-  ;; On réduit légèrement la taille de la police (:height 0.8) pour accentuer l'effet étiquette
-  (set-face-attribute 'org-tag nil
-                      :box '(:line-width 1 :color "grey50")
-                      :height 0.8
-                      :weight 'normal)
-
-  ;; 3. Les Dates et horodatages
-  (set-face-attribute 'org-date nil
-                      :box '(:line-width 1 :color "grey70")
-                      :underline nil))
-
+          ("CANCELLED" . (:foreground "grey"     :weight bold :strike-through t)))))
 
 ;;;; MODELINE
 (dolist (buf-name '(" *Echo Area 0*" " *Echo Area 1*"))
@@ -808,24 +838,6 @@
     (setq-local face-remapping-alist nil)
     ;; 2. On applique la réduction de manière fixe
     (face-remap-add-relative 'default :height 0.90)))
-
-;; Réduire la taille de la modeline de 20% par rapport à la police par défaut
-;; Face de base (par sécurité pour les héritages)
-(set-face-attribute 'mode-line nil :height 0.90)
-
-;; Fenêtre active (le paramètre manquant pour Emacs 29+)
-(set-face-attribute 'mode-line-active nil :height 0.90)
-
-;; Masquer la modeline inactive en fusionnant ses couleurs avec le fond par défaut
-(set-face-attribute 'mode-line-inactive nil
-                    ;; Le texte prend la couleur du fond d'Emacs
-                    :foreground (face-attribute 'default :background)
-                    ;; Le fond de la modeline prend la couleur du fond d'Emacs
-                    :background (face-attribute 'default :background)
-                    ;; Supprimer les bordures ou ombres éventuelles
-                    :box nil
-                    :overline nil
-                    :underline nil)
 
 (use-package time
   :ensure nil
@@ -857,18 +869,22 @@
   (setq global-mode-string (append global-mode-string '(usr--system-status-string))))
 
 (defun usr--actualiser-affichage ()
-  "Génère le texte compact et force la mise à jour visuelle."
-  (let ((symboles (delq nil (list (when usr--gpg-unlocked "gpg")
-                                  (when usr--reseau-online "net")
-                                  (when usr--ssh-mounted "srv")
-                                  (when usr--syncthing-online "lan")
-                                  (when usr--hydroxide-online "eml"))))) ; <-- Modifié ici
-    (setq usr--system-status-string
+  "Met à jour l’état système uniquement s’il a changé."
+  (let* ((symboles
+          (delq nil
+                (list (when usr--gpg-unlocked "gpg")
+                      (when usr--reseau-online "net")
+                      (when usr--ssh-mounted "srv")
+                      (when usr--syncthing-online "lan")
+                      (when usr--hydroxide-online "eml"))))
+         (nouveau
           (if symboles
-              (format "[%s] " (mapconcat 'identity symboles " "))
-            " "))
-    (force-mode-line-update t)))
-
+              (format "[%s] " (mapconcat #'identity symboles " "))
+            " ")))
+    (unless (equal nouveau usr--system-status-string)
+      (setq usr--system-status-string nouveau)
+      (force-mode-line-update t))))
+ 
 (defun usr--network-online-p ()
   "Vérifie localement si une route par défaut active existe (sans envoyer de paquets)."
   (let ((route-file "/proc/net/route"))
@@ -879,48 +895,61 @@
            ;; Cherche '00000000' dans la colonne Destination (indique la passerelle par défaut)
            (not (null (re-search-forward "^[a-z0-9]+\\s-+00000000\\s-+" nil t)))))))
 
+(defun usr--monte-p (point-de-montage)
+  "Vrai si POINT-DE-MONTAGE figure dans /proc/mounts.
+Lecture en Lisp pur, sans lancer de processus — même approche que
+`usr--network-online-p'."
+  (let ((chemin (directory-file-name (expand-file-name point-de-montage))))
+    (and (file-exists-p "/proc/mounts")
+         (with-temp-buffer
+           (insert-file-contents "/proc/mounts")
+           (goto-char (point-min))
+           ;; Chaque ligne : périphérique, point de montage, type, options…
+           ;; Le noyau échappe les espaces du chemin en \040.
+           (and (search-forward
+                 (concat " " (string-replace " " "\\040" chemin) " ")
+                 nil t)
+                t)))))
+
+(defun usr--processus-actif-p (nom)
+  "Retourne non-nil si un processus dont la commande est NOM existe."
+  (seq-some
+   (lambda (pid)
+     (when-let ((attributs (process-attributes pid)))
+       (string= (alist-get 'comm attributs) nom)))
+   (list-system-processes)))
+
 (defun usr--verifier-systeme ()
-  "Moteur de vérification principal 100% asynchrone."
-  ;; 1. GPG Async
+
   (setq usr--gpg-unlocked nil)
   (make-process
-   :name "gpg-check" :buffer nil
+   :name "gpg-check" :buffer nil :noquery t
    :command '("gpg-connect-agent" "keyinfo --list" "/bye")
    :filter (lambda (_proc output)
              (when (string-match-p "KEYINFO .*\\b1\\b" output)
                (setq usr--gpg-unlocked t)))
    :sentinel (lambda (_proc _event) (usr--actualiser-affichage)))
 
-  ;; 2. SSH Async
-  (make-process
-   :name "ssh-check" :buffer nil
-   :command (list "mountpoint" "-q" (expand-file-name "~/Club1"))
-   :sentinel (lambda (proc _event)
-               (setq usr--ssh-mounted (= (process-exit-status proc) 0))
-               (usr--actualiser-affichage)))
-  
-  ;; 3. Syncthing Async
-  (make-process
-   :name "syncthing-check" :buffer nil
-   :command '("pgrep" "-x" "syncthing")
-   :sentinel (lambda (proc _event)
-               (setq usr--syncthing-online (= (process-exit-status proc) 0))
-               (usr--actualiser-affichage)))
+  (setq usr--syncthing-online
+	(usr--processus-actif-p "syncthing")
+	usr--hydroxide-online
+	(usr--processus-actif-p "hydroxide")
+	usr--reseau-online
+	(usr--network-online-p)
+	usr--ssh-mounted
+	(usr--monte-p "~/Club1"))
 
-  ;; 4. Réseau Async
-  (setq usr--reseau-online (usr--network-online-p))
+  (usr--actualiser-affichage))
+(defvar usr-sondage-intervalle 60)
+(defvar usr--verifier-systeme-timer nil)
   
-  ;; 5. Hydroxide Async
-  (make-process
-   :name "hydroxide-check" :buffer nil
-   :command '("pgrep" "-x" "hydroxide")
-   :sentinel (lambda (proc _event)
-               (setq usr--hydroxide-online (= (process-exit-status proc) 0))
-               (usr--actualiser-affichage))))
+(when (timerp usr--verifier-systeme-timer)
+  (cancel-timer usr--verifier-systeme-timer))
 
 (usr--verifier-systeme)
-(run-with-timer 0 10 #'usr--verifier-systeme)
-
+(setq usr--verifier-systeme-timer
+      (run-with-timer 0 usr-sondage-intervalle #'usr--verifier-systeme))
+  
 ;;;; EXWM
 (require 'exwm)
 (require 'exwm-input)
@@ -1012,7 +1041,7 @@
 
 (defun usr-redemarrer ()
       (interactive)
-      (when (yes-or-no-p "Redématrer l'ordinateur ? ")
+      (when (yes-or-no-p "Redémarrer l'ordinateur ? ")
         (save-some-buffers) ;; Sauvegarde silencieuse de tout ce qui a été modifié
         (start-process "reboot" nil "reboot")))
 
@@ -1020,16 +1049,33 @@
   (interactive)
   (start-process "suspend" nil "suspend"))
 
+(defun usr-ecran-verrouiller ()
+  "Verrouille l'écran avec slock.
+Le binaire setuid est fourni par `screen-locker-service-type' (config.scm)."
+  (interactive)
+  (start-process "slock" nil "/run/setuid-programs/slock"))
+
+;;;; Guix
+(defun usr-guix-mettre-a-jour ()
+  "Lance `guix pull' dans un tampon de compilation.
+Les canaux utilisés sont ceux de ~/.config/guix/channels.scm. La
+reconfiguration du système et du profil Home reste une opération
+délibérée, à lancer séparément."
+  (interactive)
+  (compilation-start "guix pull" nil (lambda (_) "*guix pull*")))
+
 ;;;; EXWM — PRÉALABLES CLAVIER :::::::::::::::::::::::::::::::::::::::::::::::
 ;; Toutes les touches sont déclarées dans la section « RACCOURCIS » en fin de
-;; fichier, seul endroit du fichier où une liaison est définie.
+;; fichier, seul endroit du fichier où une liaison globale est définie.
 
 (with-eval-after-load 'exwm
   ;; C-g et C-c restent à Emacs, jamais transmis au client X.
   (dolist (k '(?\C-g ?\C-c))
     (add-to-list 'exwm-input-prefix-keys k)))
 
-(exwm-wm-mode)
+(if (getenv "LATECI_NO_EXWM")
+    (message "LATECI_NO_EXWM : exwm-wm-mode non activé (mode diagnostic).")
+  (exwm-wm-mode))
 
 ;;; INSPIRATION :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
@@ -1052,11 +1098,11 @@
 (use-package elfeed
   :bind
   (:map elfeed-search-mode-map
-   ("c" . usr-flux-capturer)
-   ("d" . usr-flux-telecharger-audio)
+   ("c" . teci-flux-capturer)
+   ("d" . teci-flux-telecharger-audio)
    :map elfeed-show-mode-map
-   ("c" . usr-flux-capturer)
-   ("d" . usr-flux-telecharger-audio))
+   ("c" . teci-flux-capturer)
+   ("d" . teci-flux-telecharger-audio))
    
   :custom
   (elfeed-search-face-alist '((unread . (font-lock-keyword-face bold))))
@@ -1181,7 +1227,8 @@
      ("file"     "Relative or absolute path to attachments" "" )))
   (bibtex-align-at-equal-sign t)
   :config
-  (ews-bibtex-register))
+  (when (fboundp 'ews-bibtex-register)
+    (ews-bibtex-register)))
 
 ;; Biblio package for adding BibTeX records
 (use-package biblio)
@@ -1399,20 +1446,14 @@
   (setq diary-file (expand-file-name "diary" user-emacs-directory))
   (unless (file-exists-p diary-file)
     (with-temp-file diary-file
-      (insert "%%(org-diary)\n")))
-  
-  ;; --- TYPOGRAPHIE ET APPARENCE ---
-  (custom-set-faces
-   '(calendar-today ((t (:weight bold :foreground "white" :background "dark blue"))))
-   '(calendar-weekend-header ((t (:foreground "firebrick"))))
-   '(calendar-month-header ((t (:weight bold :height 1.2))))
-   ;; Apparence des jours marqués (ceux avec des RDV, TODO planifiés, etc.)
-   '(diary ((t (:weight bold :foreground "dark green"))))))
+      (insert "%%(org-diary)\n"))))
 
 ;; --- CORRECTION DE LA GRILLE ---
-(add-hook 'calendar-mode-hook
-          (lambda ()
-            (face-remap-add-relative 'default :family "Monospace")))
+(defun usr--calendrier-police-fixe ()
+  "Force une police à chasse fixe : la grille du calendrier en dépend."
+  (face-remap-add-relative 'default :family "Monospace"))
+
+(add-hook 'calendar-mode-hook #'usr--calendrier-police-fixe)
 
 (setq org-read-date-popup-calendar nil)
 
@@ -1503,7 +1544,7 @@
 ;;;; Image viewer
 (use-package emacs
   :custom
-  (image-dired-external-viewer "gimp")
+  (image-dired-external-viewer "display")
   :bind
   (:map image-mode-map
          ("k" . image-kill-buffer)
@@ -1574,28 +1615,28 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
 	
 	;; --- Nouveaux Courriels --- 
         '((:name "Nouveau(x) courriel(s) pour la TECI"
-                 :query "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"
+                 :query "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"
                  :key "n")
 	  (:name "Nouveau(x) courriel(s) du Fight-Club"
                  :query "tag:unread AND to:fight-club@framagroupes.org AND NOT tag:trash"
                  :key "c")
 	  (:name "Nouveau(x) courriel(s) du Hangar"
-                 :query "tag:unread AND (to:membres.actif-ves@lestempsdarts.lautre.net OR commission.numerique@lestempsdarts.lautre.net OR actus@lestempsdarts.lautre.net) AND NOT tag:trash"
+                 :query "tag:unread AND (to:membres.actif-ves@lestempsdarts.lautre.net OR to:commission.numerique@lestempsdarts.lautre.net OR to:actus@lestempsdarts.lautre.net) AND NOT tag:trash"
                  :key "h")
 	   (:name "Nouveau(x) courriel(s) perso"
                  :query "tag:unread AND to:thomas.millasseau@protonmail.com AND NOT tag:trash"
                  :key "N")
 	   
-	  ;; --- Boites de recpetion ---	   
+	  ;; --- Boites de récpetion ---	   
 	  (:name "Boites de réception de la TECI"
-                 :query "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"
+                 :query "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"
                  :key "p")
 	  (:name "Boite de réception du Fight-Club"
                  :query "tag:inbox AND to:fight-club@framagroupes.org AND NOT tag:trash"
                  :key "f")
 	  (:name "Boite de réception du Hangar"
                  :query "tag:inbox AND (to:membres.actif-ves@lestempsdarts.lautre.net OR to:commission.numerique@lestempsdarts.lautre.net OR to:actus@lestempsdarts.lautre.net) AND NOT tag:trash"
-                 :key "h")	  
+                 :key "H")	  
           (:name "Boite de réception personnelle"
                  :query "tag:inbox AND to:thomas.millasseau@protonmail.com AND NOT tag:trash"
                  :key "P")
@@ -1664,7 +1705,7 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
          (if (/= (process-exit-status p) 0)
              (usr--stop-spinner (format "Échec mbsync : %s" (string-trim event)))
            (progn
-             (usr--stop-spinner "mise à jours des xcourriels terminée !")
+             (usr--stop-spinner "mise à jours des courriels terminée !")
              (when (fboundp 'notmuch-poll)
                (notmuch-poll))
              (when (fboundp 'notmuch-hello-update)
@@ -1674,12 +1715,12 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
 (defun usr-courriel-nouveaux ()
   "Ouvre les courriels non lus du Terrain d'Expérimentation de Créations et d'Initiative."
   (interactive)
-  (notmuch-search "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"))
+  (notmuch-search "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"))
 
 (defun usr-courriel-boite ()
   "Ouvre la boite de réception globale."
   (interactive)
-  (notmuch-search "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"))
+  (notmuch-search "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"))
 
 ;; ENVOI COURRIEL VIA CLUB1 (SMTP)
 (setq user-full-name "LA TECI"
@@ -1749,18 +1790,24 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
         (exwm-workspace-switch-to-buffer buf)
       (start-process "icecat" nil "icecat"))))
 
-;; Utiliser Luakit comme navigateur par défaut
 (setq browse-url-browser-function 'browse-url-generic)
 (setq browse-url-generic-program "icecat")
 
-
-;;;;;; --- XTERM ---
+;;;;; --- XTERM ---
 (defun usr-terminal ()
   (interactive)
   (let ((buf (get-buffer "XTerm")))
     (if (and buf (buffer-live-p buf))
         (exwm-workspace-switch-to-buffer buf)
       (start-process "xterm" nil "xterm"))))
+
+;;;;; --- SOFFICE ---
+(defun usr-bureautique ()
+ (interactive)
+ (let ((buf (get-buffer "soffice")))
+   (if (and buf (buffer-live-p buf))
+       (exwm-workspace-switch-to-buffer buf)
+     (start-process "soffice" nil "soffice"))))
 
 ;;;; SSHFS :::::::::::::::::::::::::::::::::::::::::::::::
 
@@ -1859,14 +1906,12 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
 
 (defun usr--cle-anthropic ()
   (string-trim (shell-command-to-string "pass show api/claude")))
-
 (defun usr--cle-gemini ()
   (string-trim (shell-command-to-string "pass show api/gemini")))
-
 (defun usr--cle-openai ()
   (string-trim (shell-command-to-string "pass show api/openai")))
 
-(defvar usr-ia-modele-rapide 'claude-haiku-4-5)
+(defvar usr-ia-modele-rapide 'gpt-5.6-luna)
 
 (defun usr-ia-corriger (debut fin &optional systeme)
   "Corrige la région en place. SYSTEME optionnel remplace la directive."
@@ -1966,10 +2011,6 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
                 gemini-3.6-flash
                 gemini-3.1-pro-preview)))
 
-  (setq gptel-backend gptel--backend-anthropic
-        gptel-model 'claude-opus-5
-	gptel-cache '(message system tool))
-
     (defvar gptel--backend-openai
     (gptel-make-openai "openai"
       :key #'usr--cle-openai
@@ -1978,10 +2019,9 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
                 gpt-5.6-terra
 		gpt-5.6-luna)))
 
-  (setq gptel-backend gptel--backend-anthropic
-        gptel-model 'claude-opus-5
+    (setq gptel-backend gptel--backend-openai
+        gptel-model 'gpt-5.6-terra
 	gptel-cache '(message system tool))
-
   
   ;; --- Outils ---
   (defvar usr--ia-outil-notes
@@ -2280,10 +2320,13 @@ insérée au point plutôt qu'affichée."
   :config
 (setq ledger-master-file usr-compta-fichier)
 
-(add-hook 'ledger-mode-hook
-          (lambda ()
-            (when buffer-file-name
-              (setq-local ledger-master-file buffer-file-name))))
+(defun usr--ledger-master-courant ()
+  "Prend le fichier visité comme journal maître."
+  (when buffer-file-name
+    (setq-local ledger-master-file buffer-file-name)))
+
+(add-hook 'ledger-mode-hook #'usr--ledger-master-courant)
+
   :bind
   (:map ledger-mode-map
         ("C-c C-a" . ledger-add-transaction)
@@ -2360,21 +2403,6 @@ insérée au point plutôt qu'affichée."
   "Ouvre le fichier d'initialisation."
   (interactive)
   (find-file user-init-file))
-
-(defun usr-ecran-verrouiller ()
-  "Verrouille l'écran avec slock."
-  (interactive)
-  (let ((slock (or (executable-find "slock")
-                   (and (file-executable-p "/run/setuid-programs/slock")
-                        "/run/setuid-programs/slock"))))
-    (if slock
-        (start-process "slock" nil slock)
-      (user-error "slock est introuvable"))))
-
-(defun usr-guix-mettre-a-jour ()
-  "Lance « guix pull » dans un tampon de compilation."
-  (interactive)
-  (compilation-start "guix pull" nil (lambda (_) "*guix pull*")))
 
 (defun usr-agenda-trois-jours ()
   "Ouvre la vue d'agenda « trois jours, actions et attentes »."
@@ -2497,10 +2525,12 @@ insérée au point plutôt qu'affichée."
   [["Terminaux"
     ("t" "terminal (XTerm)" usr-terminal)
     ("e" "eshell"           eshell)
+    ("S" "shell"            shell)
     ("p" "processus"        proced)]
    ["Bureau"
     ("f" "fichiers (Dired)" dired)
     ("n" "navigateur"       usr-navigateur)
+    ("o" "LibreOffice"      usr-bureautique)
     ("k" "mode kiosque"     usr-kiosque-activer)
     ("K" "quitter le kiosque" usr-kiosque-desactiver)]
    ["Média"
