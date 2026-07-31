@@ -25,6 +25,20 @@
 ;; l'écran entier.
 (setq frame-inhibit-implied-resize t)
 
+;; Frame initiale en plein écran dès sa création.
+;;
+;; .xinitrc lance Emacs sans gestionnaire de fenêtres (c'est lui qui le
+;; devient), mais `exwm-wm-mode' n'est appelé qu'à la toute fin d'init.el.
+;; Sans cette ligne, la frame reste à sa taille par défaut (80x25) dans un coin
+;; de l'écran pendant tout le chargement. Faute de WM pour honorer la requête
+;; EWMH, Emacs se rabat sur un redimensionnement direct aux dimensions de
+;; l'écran — ce qu'on veut ici.
+;;
+;; `initial-frame-alist' et non `default-frame-alist' : seule la frame de
+;; départ est concernée, les frames créées ensuite par
+;; `exwm-workspace-switch-create' gardent leur comportement propre.
+(push '(fullscreen . fullboth) initial-frame-alist)
+
 ;; L'écran d'accueil est déjà désactivé dans init.el ; le poser ici évite qu'il
 ;; soit brièvement composé.
 (setq inhibit-startup-screen t)
