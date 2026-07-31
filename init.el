@@ -1896,7 +1896,9 @@ délibérée, à lancer séparément."
 ;;;; Image viewer
 (use-package emacs
   :custom
-  (image-dired-external-viewer "gimp")
+  ;; « gimp » n'est pas au profil : C-<return> depuis dired échouait.
+  ;; `display' vient d'imagemagick, déjà installé.
+  (image-dired-external-viewer "display")
   :bind
   (:map image-mode-map
          ("k" . image-kill-buffer)
