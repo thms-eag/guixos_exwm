@@ -63,70 +63,70 @@
 ;; =======================================================
 ;; COMPTEURS POUR DEVIS
 ;; =======================================================
-(defvar lateci--devis-client "")
-(defvar lateci--devis-num "")
-(defvar lateci--devis-tags "")
-(defvar lateci--devis-counter-file (expand-file-name "devis-counter.el" user-emacs-directory))
+(defvar usr--devis-client "")
+(defvar usr--devis-num "")
+(defvar usr--devis-tags "")
+(defvar usr--devis-counter-file (expand-file-name "devis-counter.el" user-emacs-directory))
 
-(defun lateci--get-next-devis-num ()
+(defun usr--get-next-devis-num ()
   "Génère le prochain numéro de devis. Le compteur repart à 01 chaque nouvelle année."
   (let* ((current-year (format-time-string "%Y"))
          ;; Lit le fichier s'il existe, sinon initialise une paire vide
-         (data (if (file-exists-p lateci--devis-counter-file)
+         (data (if (file-exists-p usr--devis-counter-file)
                    (with-temp-buffer
-                     (insert-file-contents lateci--devis-counter-file)
+                     (insert-file-contents usr--devis-counter-file)
                      (read (current-buffer)))
                  '("" . 0)))
          (last-year (car data))
          (last-count (cdr data))
          (new-count (if (string= current-year last-year) (1+ last-count) 1)))
-    (with-temp-file lateci--devis-counter-file
+    (with-temp-file usr--devis-counter-file
       (insert (prin1-to-string (cons current-year new-count))))
     (format "%02d" new-count)))
 
 ;; =======================================================
 ;; COMPTEURS POUR FACTURES
 ;; =======================================================
-(defvar lateci--facture-client "")
-(defvar lateci--facture-num "")
-(defvar lateci--facture-tags "")
-(defvar lateci--facture-counter-file (expand-file-name "facture-counter.el" user-emacs-directory))
+(defvar usr--facture-client "")
+(defvar usr--facture-num "")
+(defvar usr--facture-tags "")
+(defvar usr--facture-counter-file (expand-file-name "facture-counter.el" user-emacs-directory))
 
-(defun lateci--get-next-facture-num ()
+(defun usr--get-next-facture-num ()
   "Génère le prochain numéro de facture (réinitialisation annuelle)."
   (let* ((current-year (format-time-string "%Y"))
-         (data (if (file-exists-p lateci--facture-counter-file)
+         (data (if (file-exists-p usr--facture-counter-file)
                    (with-temp-buffer
-                     (insert-file-contents lateci--facture-counter-file)
+                     (insert-file-contents usr--facture-counter-file)
                      (read (current-buffer)))
                  '("" . 0)))
          (last-year (car data))
          (last-count (cdr data))
          (new-count (if (string= current-year last-year) (1+ last-count) 1)))
-    (with-temp-file lateci--facture-counter-file
+    (with-temp-file usr--facture-counter-file
       (insert (prin1-to-string (cons current-year new-count))))
     (format "%02d" new-count)))
 
 ;; =======================================================
 ;; COMPTEURS POUR REÇUS
 ;; =======================================================
-(defvar lateci--recu-client "")
-(defvar lateci--recu-num "")
-(defvar lateci--recu-tags "")
-(defvar lateci--recu-counter-file (expand-file-name "recu-counter.el" user-emacs-directory))
+(defvar usr--recu-client "")
+(defvar usr--recu-num "")
+(defvar usr--recu-tags "")
+(defvar usr--recu-counter-file (expand-file-name "recu-counter.el" user-emacs-directory))
 
-(defun lateci--get-next-recu-num ()
+(defun usr--get-next-recu-num ()
   "Génère le prochain numéro de reçu (réinitialisation annuelle)."
   (let* ((current-year (format-time-string "%Y"))
-         (data (if (file-exists-p lateci--recu-counter-file)
+         (data (if (file-exists-p usr--recu-counter-file)
                    (with-temp-buffer
-                     (insert-file-contents lateci--recu-counter-file)
+                     (insert-file-contents usr--recu-counter-file)
                      (read (current-buffer)))
                  '("" . 0)))
          (last-year (car data))
          (last-count (cdr data))
          (new-count (if (string= current-year last-year) (1+ last-count) 1)))
-    (with-temp-file lateci--recu-counter-file
+    (with-temp-file usr--recu-counter-file
       (insert (prin1-to-string (cons current-year new-count))))
     (format "%02d" new-count)))
   
@@ -191,17 +191,17 @@
      ;; ------------------------------------------------------     
      ("d" "DEVIS" plain
       (file (lambda ()
-              (setq lateci--devis-client (read-string "Nom du client : "))              
+              (setq usr--devis-client (read-string "Nom du client : "))              
               (let ((user-tags (read-string "Tags additionnels (optionnels, ex: asso formation) : ")))
-                (setq lateci--devis-tags (if (string-empty-p user-tags)
+                (setq usr--devis-tags (if (string-empty-p user-tags)
                                              "devis"
                                            (concat "devis_" (replace-regexp-in-string "[^[:alnum:]]+" "_" (downcase user-tags))))))              
-              (setq lateci--devis-num (lateci--get-next-devis-num))
+              (setq usr--devis-num (usr--get-next-devis-num))
               (let* ((time-str (format-time-string "%Y%m%dT%H%M%S"))
-                     (client-slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase lateci--devis-client)))
-                     (filename (format "%s--%s-%s__%s.org" time-str client-slug lateci--devis-num lateci--devis-tags)))
+                     (client-slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase usr--devis-client)))
+                     (filename (format "%s--%s-%s__%s.org" time-str client-slug usr--devis-num usr--devis-tags)))
                 (expand-file-name filename "~/Bureau/"))))
-      "#+TITLE: DEVIS %<%Y%m%d>-%(identity lateci--devis-num)
+      "#+TITLE: DEVIS %<%Y%m%d>-%(identity usr--devis-num)
 #+AUTHOR: LA TECI
 #+OPTIONS: num:nil title:nil toc:nil
 #+LATEX_CLASS: article
@@ -229,14 +229,14 @@
   \\begin{flushright}
     \\vspace{-1cm}
     {\\Huge \\textbf{\\textcolor{lateciblue}{DEVIS}}} \\\\[0.5em]
-    \\textbf{Numéro :} %<%Y%m%d>-%(identity lateci--devis-num) \\\\
+    \\textbf{Numéro :} %<%Y%m%d>-%(identity usr--devis-num) \\\\
     \\textbf{Date :} %<%d %B %Y> \\\\[1.5em]
     % Boîte d'adresse du destinataire
     \\colorbox{gray!10}{
       \\begin{minipage}{0.8\\textwidth}
         \\vspace{0.2cm}
         \\textbf{Destinataire} \\\\
-        \\textbf{%(identity lateci--devis-client)} \\\\
+        \\textbf{%(identity usr--devis-client)} \\\\
         %^{Adresse du Client}
         \\vspace{0.2cm}
       \\end{minipage}
@@ -313,19 +313,19 @@
      ;; ------------------------------------------------------
      ("F" "FACTURE" plain
       (file (lambda ()
-              (setq lateci--facture-client (read-string "Nom du client : "))
+              (setq usr--facture-client (read-string "Nom du client : "))
               
               (let ((user-tags (read-string "Tags additionnels (optionnels) : ")))
-                (setq lateci--facture-tags (if (string-empty-p user-tags)
+                (setq usr--facture-tags (if (string-empty-p user-tags)
                                            "facture"
                                          (concat "facture_" (replace-regexp-in-string "[^[:alnum:]]+" "_" (downcase user-tags))))))
               
-              (setq lateci--facture-num (lateci--get-next-facture-num))
+              (setq usr--facture-num (usr--get-next-facture-num))
               (let* ((time-str (format-time-string "%Y%m%dT%H%M%S"))
-                     (client-slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase lateci--facture-client)))
-                     (filename (format "%s--%s-%s__%s.org" time-str client-slug lateci--facture-num lateci--facture-tags)))
+                     (client-slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase usr--facture-client)))
+                     (filename (format "%s--%s-%s__%s.org" time-str client-slug usr--facture-num usr--facture-tags)))
                 (expand-file-name filename "~/Bureau/"))))
-      "#+TITLE: FACTURE %<%Y%m%d>-%(identity lateci--facture-num)
+      "#+TITLE: FACTURE %<%Y%m%d>-%(identity usr--facture-num)
 #+AUTHOR: LA TECI
 #+OPTIONS: num:nil title:nil toc:nil
 #+LATEX_CLASS: article
@@ -353,14 +353,14 @@
   \\begin{flushright}
     \\vspace{-1cm}
     {\\Huge \\textbf{\\textcolor{lateciblue}{FACTURE}}} \\\\[0.5em]
-    \\textbf{Numéro :} %<%Y%m%d>-%(identity lateci--facture-num) \\\\
+    \\textbf{Numéro :} %<%Y%m%d>-%(identity usr--facture-num) \\\\
     \\textbf{Date :} %<%d %B %Y> \\\\[1.5em]
     % Boîte d'adresse du destinataire
     \\colorbox{gray!10}{
       \\begin{minipage}{0.8\\textwidth}
         \\vspace{0.2cm}
         \\textbf{Destinataire} \\\\
-        \\textbf{%(identity lateci--facture-client)} \\\\
+        \\textbf{%(identity usr--facture-client)} \\\\
         %^{Adresse du Client}
         \\vspace{0.2cm}
       \\end{minipage}
@@ -435,16 +435,16 @@
      ;; ------------------------------------------------------
      ("u" "REÇU" plain
       (file (lambda ()
-              (setq lateci--recu-client (read-string "Nom du payeur : "))
+              (setq usr--recu-client (read-string "Nom du payeur : "))
               (let ((user-tags (read-string "Tags additionnels (optionnels) : ")))
-                (setq lateci--recu-tags (if (string-empty-p user-tags) "recu"
+                (setq usr--recu-tags (if (string-empty-p user-tags) "recu"
                                            (concat "recu_" (replace-regexp-in-string "[^[:alnum:]]+" "_" (downcase user-tags))))))
-              (setq lateci--recu-num (lateci--get-next-recu-num))
+              (setq usr--recu-num (usr--get-next-recu-num))
               (let* ((time-str (format-time-string "%Y%m%dT%H%M%S"))
-                     (client-slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase lateci--recu-client)))
-                     (filename (format "%s--%s-%s__%s.org" time-str client-slug lateci--recu-num lateci--recu-tags)))
+                     (client-slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase usr--recu-client)))
+                     (filename (format "%s--%s-%s__%s.org" time-str client-slug usr--recu-num usr--recu-tags)))
                 (expand-file-name filename "~/Bureau/"))))
-      "#+TITLE: REÇU %<%Y%m%d>-%(identity lateci--recu-num)
+      "#+TITLE: REÇU %<%Y%m%d>-%(identity usr--recu-num)
 #+AUTHOR: LA TECI
 #+OPTIONS: num:nil title:nil toc:nil
 #+LATEX_CLASS: article
@@ -470,13 +470,13 @@
   \\begin{flushright}
     \\vspace{-1cm}
     {\\Huge \\textbf{REÇU}} \\\\[0.5em]
-    \\textbf{Numéro :} %<%Y%m%d>-%(identity lateci--recu-num) \\\\
+    \\textbf{Numéro :} %<%Y%m%d>-%(identity usr--recu-num) \\\\
     \\textbf{Date :} %<%d %B %Y> \\\\[1.5em]
     \\fbox{
       \\begin{minipage}{0.8\\textwidth}
         \\vspace{0.2cm}
         \\textbf{Payeur :} \\\\
-        \\textbf{%(identity lateci--recu-client)} \\\\
+        \\textbf{%(identity usr--recu-client)} \\\\
         %^{Adresse du Client}
         \\vspace{0.2cm}
       \\end{minipage}
@@ -533,20 +533,9 @@
 \\end{minipage}
 #+END_EXPORT
 "
-      :jump-to-captured t)))
+      :jump-to-captured t))))
 
   
-  :bind
-  ;; --- Raccourcis Globaux ---
-  (("C-c c" . org-capture)
-   ("C-c l" . org-store-link)
-   ("C-c a" . org-agenda)
-   ("C-c A" . (lambda () (interactive) (org-agenda nil "e")))
-   ;; --- Raccourcis Spécifiques au Mode ---
-   :map org-mode-map
-   ("C-c w n" . ews-org-insert-notes-drawer)
-   ("C-c w p" . ews-org-insert-screenshot)
-   ("C-c w c" . ews-org-count-words)))
 
 ;;; LOOK AND FEEL :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
@@ -564,11 +553,7 @@
   (modus-themes-bold-constructs t)
   (modus-themes-mixed-fonts t)
   (modus-themes-to-toggle '(modus-operandi
-			    modus-vivendi))
-  :bind
-  (("C-c w t t" . modus-themes-toggle)
-   ("C-c w t m" . modus-themes-select)
-   ("C-c w t s" . consult-theme)))
+			    modus-vivendi)))
 
 (setq inhibit-splash-screen t)
 (tool-bar-mode -1)
@@ -642,14 +627,12 @@
 
 (use-package consult
   :bind
-  (("C-c w h" . consult-org-heading)
-   ("C-c w g" . consult-grep)
-   ("C-x b"   . consult-buffer)) ;; Remplace le switch-to-buffer par défaut
+  (("C-x b" . consult-buffer))
   :config
   (add-to-list 'consult-preview-allowed-hooks 'visual-line-mode)
   
   ;; --- Catégorie dédiée pour les applications X11 (EXWM) ---
-  (defvar lateci-consult--source-exwm
+  (defvar usr--consult-source-exwm
     `(:name "Applications X11"
       :narrow ?x
       :category buffer
@@ -661,7 +644,7 @@
                       (when (eq major-mode 'exwm-mode)
                         (push (buffer-name buf) exwm-bufs))))
                   exwm-bufs))))
-  (add-to-list 'consult-buffer-sources 'lateci-consult--source-exwm 'append))
+  (add-to-list 'consult-buffer-sources 'usr--consult-source-exwm 'append))
 
 ;; Outline-minor-mode
 (setq outline-minor-mode-cycle t)
@@ -698,18 +681,16 @@
   :config
   (which-key-mode)
   :custom
-  (which-key-max-iption-length 40)
+  ;; NB : la variable s'appelle bien `which-key-max-description-length'.
+  ;; L'ancienne configuration écrivait `which-key-max-iption-length', qui
+  ;; n'existe pas — le réglage n'avait donc aucun effet.
+  (which-key-max-description-length 40)
   (which-key-lighter nil)
-  (which-key-sort-order 'which-key-description-order)
-  :init
-  (which-key-add-key-based-replacements
-    "C-c w"   "Emacs Writing Studio"
-    "C-c w b" "Bibliographic"
-    "C-c w d" "Denote"
-    "C-c w m" "Multimedia"
-    "C-c w s" "Spelling and Grammar"
-    "C-c w t" "Themes"
-    "C-c w x" "Explore"))
+  ;; Tri par touche et non par description : les préfixes ne sont plus
+  ;; éparpillés au milieu des commandes.
+  (which-key-sort-order 'which-key-key-order-alpha)
+  (which-key-idle-delay 0.4)
+  (which-key-add-column-padding 2))
 
 ;;;;; Contextual menu with right mouse button
 (when (display-graphic-p)
@@ -762,8 +743,7 @@
   :hook
   (text-mode . flyspell-mode)
   :bind
-  (("C-c w s s" . ispell)
-   ("C-;"       . flyspell-auto-correct-previous-word)))
+  (("C-;" . flyspell-auto-correct-previous-word)))
 
 ;; LaTeX previews
 (use-package org-fragtog
@@ -865,31 +845,31 @@
 (setq-default mode-line-position '("%p¶%l"))
 
 ;;;;; Modeline unifiée (Réseau, SSH, Hydroxide, GPG, Syncthing) 
-(defvar lateci--reseau-online nil)
-(defvar lateci--gpg-unlocked nil)
-(defvar lateci--ssh-mounted nil)
-(defvar lateci--syncthing-online nil)
-(defvar lateci--hydroxide-online nil)
-(defvar lateci--system-status-string " ")
+(defvar usr--reseau-online nil)
+(defvar usr--gpg-unlocked nil)
+(defvar usr--ssh-mounted nil)
+(defvar usr--syncthing-online nil)
+(defvar usr--hydroxide-online nil)
+(defvar usr--system-status-string " ")
 
 (or global-mode-string (setq global-mode-string '("")))
-(unless (memq 'lateci--system-status-string global-mode-string)
-  (setq global-mode-string (append global-mode-string '(lateci--system-status-string))))
+(unless (memq 'usr--system-status-string global-mode-string)
+  (setq global-mode-string (append global-mode-string '(usr--system-status-string))))
 
-(defun lateci--actualiser-affichage ()
+(defun usr--actualiser-affichage ()
   "Génère le texte compact et force la mise à jour visuelle."
-  (let ((symboles (delq nil (list (when lateci--gpg-unlocked "gpg")
-                                  (when lateci--reseau-online "net")
-                                  (when lateci--ssh-mounted "srv")
-                                  (when lateci--syncthing-online "lan")
-                                  (when lateci--hydroxide-online "eml"))))) ; <-- Modifié ici
-    (setq lateci--system-status-string
+  (let ((symboles (delq nil (list (when usr--gpg-unlocked "gpg")
+                                  (when usr--reseau-online "net")
+                                  (when usr--ssh-mounted "srv")
+                                  (when usr--syncthing-online "lan")
+                                  (when usr--hydroxide-online "eml"))))) ; <-- Modifié ici
+    (setq usr--system-status-string
           (if symboles
               (format "[%s] " (mapconcat 'identity symboles " "))
             " "))
     (force-mode-line-update t)))
 
-(defun lateci--network-online-p ()
+(defun usr--network-online-p ()
   "Vérifie localement si une route par défaut active existe (sans envoyer de paquets)."
   (let ((route-file "/proc/net/route"))
     (and (file-exists-p route-file)
@@ -899,47 +879,47 @@
            ;; Cherche '00000000' dans la colonne Destination (indique la passerelle par défaut)
            (not (null (re-search-forward "^[a-z0-9]+\\s-+00000000\\s-+" nil t)))))))
 
-(defun lateci--verifier-systeme ()
+(defun usr--verifier-systeme ()
   "Moteur de vérification principal 100% asynchrone."
   ;; 1. GPG Async
-  (setq lateci--gpg-unlocked nil)
+  (setq usr--gpg-unlocked nil)
   (make-process
    :name "gpg-check" :buffer nil
    :command '("gpg-connect-agent" "keyinfo --list" "/bye")
    :filter (lambda (_proc output)
              (when (string-match-p "KEYINFO .*\\b1\\b" output)
-               (setq lateci--gpg-unlocked t)))
-   :sentinel (lambda (_proc _event) (lateci--actualiser-affichage)))
+               (setq usr--gpg-unlocked t)))
+   :sentinel (lambda (_proc _event) (usr--actualiser-affichage)))
 
   ;; 2. SSH Async
   (make-process
    :name "ssh-check" :buffer nil
    :command (list "mountpoint" "-q" (expand-file-name "~/Club1"))
    :sentinel (lambda (proc _event)
-               (setq lateci--ssh-mounted (= (process-exit-status proc) 0))
-               (lateci--actualiser-affichage)))
+               (setq usr--ssh-mounted (= (process-exit-status proc) 0))
+               (usr--actualiser-affichage)))
   
   ;; 3. Syncthing Async
   (make-process
    :name "syncthing-check" :buffer nil
    :command '("pgrep" "-x" "syncthing")
    :sentinel (lambda (proc _event)
-               (setq lateci--syncthing-online (= (process-exit-status proc) 0))
-               (lateci--actualiser-affichage)))
+               (setq usr--syncthing-online (= (process-exit-status proc) 0))
+               (usr--actualiser-affichage)))
 
   ;; 4. Réseau Async
-  (setq lateci--reseau-online (lateci--network-online-p))
+  (setq usr--reseau-online (usr--network-online-p))
   
   ;; 5. Hydroxide Async
   (make-process
    :name "hydroxide-check" :buffer nil
    :command '("pgrep" "-x" "hydroxide")
    :sentinel (lambda (proc _event)
-               (setq lateci--hydroxide-online (= (process-exit-status proc) 0))
-               (lateci--actualiser-affichage))))
+               (setq usr--hydroxide-online (= (process-exit-status proc) 0))
+               (usr--actualiser-affichage))))
 
-(lateci--verifier-systeme)
-(run-with-timer 0 10 #'lateci--verifier-systeme)
+(usr--verifier-systeme)
+(run-with-timer 0 10 #'usr--verifier-systeme)
 
 ;;;; EXWM
 (require 'exwm)
@@ -972,14 +952,14 @@
       ))
 
 ;;;; — Volume et Modeline —
-(defvar lateci--volume-string "[--%] ")
+(defvar usr--volume-string "[--%] ")
 
 ;; Ajout sécurisé à la modeline globale
 (or global-mode-string (setq global-mode-string '("")))
-(unless (memq 'lateci--volume-string global-mode-string)
-  (setq global-mode-string (append global-mode-string '(lateci--volume-string))))
+(unless (memq 'usr--volume-string global-mode-string)
+  (setq global-mode-string (append global-mode-string '(usr--volume-string))))
 
-(defun lateci--actualiser-volume ()
+(defun usr--actualiser-volume ()
   "Récupère le volume actuel via amixer et met à jour la modeline."
   (make-process
    :name "amixer-get"
@@ -990,249 +970,64 @@
              (when (string-match "\\[\\([0-9]+%\\)\\].*\\[\\(o[nf]+\\)\\]" output)
                (let ((vol (match-string 1 output))
                      (etat (match-string 2 output)))
-                 (setq lateci--volume-string
+                 (setq usr--volume-string
                        (if (string= etat "off")
                            "[Muet]"
                          (format "[%s]" vol)))
                  (force-mode-line-update t))))))
 
 ;; Initialiser l'affichage au démarrage d'Emacs
-(lateci--actualiser-volume)
+(usr--actualiser-volume)
 
-(defun vol-up () 
+(defun usr-volume-monter () 
   (interactive) 
   (start-process-shell-command "v-up" nil "amixer sset Master 5%+")
-  (run-at-time "0.1 sec" nil #'lateci--actualiser-volume))
+  (run-at-time "0.1 sec" nil #'usr--actualiser-volume))
 
-(defun vol-dn () 
+(defun usr-volume-baisser () 
   (interactive) 
   (start-process-shell-command "v-dn" nil "amixer sset Master 5%-")
-  (run-at-time "0.1 sec" nil #'lateci--actualiser-volume))
+  (run-at-time "0.1 sec" nil #'usr--actualiser-volume))
 
-(defun vol-tg () 
+(defun usr-volume-couper () 
   (interactive) 
   (start-process-shell-command "v-tg" nil "amixer sset Master toggle")
-  (run-at-time "0.1 sec" nil #'lateci--actualiser-volume))
+  (run-at-time "0.1 sec" nil #'usr--actualiser-volume))
 
 ;;;; — Luminosité —
-(defun light-up () 
+(defun usr-luminosite-monter () 
   (interactive) 
   (start-process-shell-command "l-up" nil "light -s sysfs/backlight/intel_backlight -A 5"))
 
-(defun light-dn () 
+(defun usr-luminosite-baisser () 
   (interactive) 
   (start-process-shell-command "l-dn" nil "light -s sysfs/backlight/intel_backlight -U 5"))
 
 ;;;; poweroff, reboot & suspend
-(defun poweroff ()
+(defun usr-eteindre ()
       (interactive)
       (when (yes-or-no-p "Éteindre l'ordinateur ? ")
         (save-some-buffers) ;; Sauvegarde silencieuse de tout ce qui a été modifié
         (start-process "poweroff" nil "poweroff")))
 
-(defun reboot ()
+(defun usr-redemarrer ()
       (interactive)
       (when (yes-or-no-p "Redématrer l'ordinateur ? ")
         (save-some-buffers) ;; Sauvegarde silencieuse de tout ce qui a été modifié
         (start-process "reboot" nil "reboot")))
 
-(defun suspend ()
+(defun usr-veille ()
   (interactive)
   (start-process "suspend" nil "suspend"))
 
-;;;; EXWM — RACCOURCIS ORGANISÉS ::::::::::::::::::::::::::::::::::::::::::::::
-;; Quatre familles seulement, toutes sous Super :
-;;   1. Touches simples  → fenêtres, tampons, espaces de travail
-;;   2. s-a …            → Applications
-;;   3. s-y …            → sYstème (énergie, chiffrement, montages, services)
-;;   4. s-g …            → Assistant IA (gptel)
-;; Mnémotechnique : s-0/1/2/3, s-b, s-k reprennent la logique du C-x d'Emacs.
+;;;; EXWM — PRÉALABLES CLAVIER :::::::::::::::::::::::::::::::::::::::::::::::
+;; Toutes les touches sont déclarées dans la section « RACCOURCIS » en fin de
+;; fichier, seul endroit du fichier où une liaison est définie.
 
-;;;;; --- Préalables ----------------------------------------------------------
 (with-eval-after-load 'exwm
   ;; C-g et C-c restent à Emacs, jamais transmis au client X.
   (dolist (k '(?\C-g ?\C-c))
     (add-to-list 'exwm-input-prefix-keys k)))
-
-(defun lateci--exwm-bind (map specs)
-  "Remplit MAP à partir de SPECS, liste de (TOUCHE . COMMANDE)."
-  (dolist (paire specs)
-    (define-key map (kbd (car paire)) (cdr paire)))
-  map)
-
-(defun lateci--exwm-set-keys (specs)
-  "Déclare SPECS, liste de (TOUCHE . COMMANDE), comme raccourcis globaux EXWM."
-  (dolist (paire specs)
-    (exwm-input-set-key (kbd (car paire)) (cdr paire))))
-
-;;;;; --- 1. Fenêtres, tampons, espaces de travail ----------------------------
-(lateci--exwm-set-keys
- '(;; Tampons et fenêtres
-   ("s-b" . consult-buffer)
-   ("s-k" . kill-current-buffer)
-   ("s-0" . delete-window)
-   ("s-o" . delete-other-windows)
-   ("s-h" . split-window-below)
-   ("s-v" . split-window-right)
-   ("s-f" . find-file)
-   ("s-<prior>" . previous-buffer)
-   ("s-<next>"  . next-buffer)
-   ;; Déplacements directionnels
-   ("s-<left>"  . windmove-left)
-   ("s-<right>" . windmove-right)
-   ("s-<up>"    . windmove-up)
-   ("s-<down>"  . windmove-down)
-   ;; Espaces de travail
-   ("s-w" . exwm-workspace-switch)
-   ("s-&" . exwm-workspace-switch-create)
-   ;; Modes de fenêtre X11
-   ("s-<tab>" . exwm-layout-toggle-fullscreen)
-   ("s-c"     . exwm-input-toggle-keyboard)
-   ;; Divers
-   ("s-x" . execute-extended-command)
-   ("s-r" . lateci/exwm-recharger)))
-
-;;;;; --- 2. Applications :  s-a ----------------------------------------------
-(define-prefix-command 'lateci-exwm-app-map)
-(lateci--exwm-bind lateci-exwm-app-map
-                   '(("t" . xterm)          ; terminal X11
-                     ("e" . eshell)         ; terminal Emacs
-                     ("i" . icecat)         ; navigateur
-                     ("d" . dired)          ; fichiers
-                     ("m" . notmuch)        ; courriels
-                     ("f" . elfeed)         ; flux RSS
-                     ("a" . org-agenda)     ; agenda
-                     ("c" . org-capture)    ; capture
-                     ("p" . proced)         ; processus
-                     ("v" . emms)))         ; musique
-(exwm-input-set-key (kbd "s-a") 'lateci-exwm-app-map)
-
-;;;;; --- 3. Système :  s-y ---------------------------------------------------
-(define-prefix-command 'lateci-exwm-sys-map)
-(lateci--exwm-bind lateci-exwm-sys-map
-                   '(;; Énergie
-                     ("q" . poweroff)
-                     ("r" . reboot)
-                     ("z" . suspend)
-                     ("l" . lateci/verrouiller-ecran)
-                     ;; Chiffrement
-                     ("g" . gpg-unlock-teci)
-                     ("G" . gpg-lock-teci)
-                     ;; Montages distants
-                     ("m" . mount-club1)
-                     ("M" . umount-club1)
-                     ;; Synchronisations
-                     ("s" . st-on)
-                     ("S" . st-off)
-                     ;; Guix
-                     ("u" . lateci/guix-pull)
-                     ("i" . guix)))
-(exwm-input-set-key (kbd "s-y") 'lateci-exwm-sys-map)
-
-;;;;; --- 4. Multimédia et rétroéclairage :  touches dédiées ------------------
-(lateci--exwm-set-keys
- '(("<XF86AudioRaiseVolume>"  . vol-up)
-   ("<XF86AudioLowerVolume>"  . vol-dn)
-   ("<XF86AudioMute>"         . vol-tg)
-   ("<XF86AudioPlay>"         . emms-pause)
-   ("<XF86AudioNext>"         . emms-next)
-   ("<XF86AudioPrev>"         . emms-previous)
-   ("<XF86MonBrightnessUp>"   . light-up)
-   ("<XF86MonBrightnessDown>" . light-dn)))
-
-;;;;; --- 5. Assistant IA :  s-g ----------------------------------------------
-(defun lateci--gptel-prep ()
-  "Charge gptel avant toute commande du préfixe s-g."
-  (unless (featurep 'gptel) (require 'gptel)))
-
-(define-prefix-command 'lateci-exwm-ia-map)
-(dolist (paire
-         '(;; Dialogue au minibuffer, disponible même depuis une fenêtre X11
-           ("q"   . lateci/gptel-question)
-           ("t"   . lateci/gptel-dialogue)
-           ("T"   . lateci/gptel-dialogue-reset)
-           ("y"   . lateci/gptel-mb-recuperer)
-           ("b"   . lateci/gptel-mb-buffer)
-           ;; Session et envoi dans un tampon Emacs
-           ("g"   . gptel)
-           ("RET" . gptel-send)
-           ("SPC" . gptel-menu)
-           ;; Action sur le texte
-           ("c"   . lateci/corriger-region)
-           ("e"   . lateci/courriel-region)
-           ("r"   . gptel-rewrite)
-           ;; Contexte
-           ("a"   . gptel-add)
-           ("x"   . gptel-context-remove-all)
-           ;; Réglages isolés du minibuffer
-           ("D"   . lateci/gptel-mb-directive)
-           ("m"   . lateci/gptel-mb-modele)
-           ("G"   . lateci/gptel-mb-modele-defaut)
-           ("?"   . lateci/gptel-mb-etat)))
-  (define-key lateci-exwm-ia-map (kbd (car paire))
-              (let ((cmd (cdr paire)))
-                (lambda ()
-                  (interactive)
-                  (lateci--gptel-prep)
-                  (call-interactively cmd)))))
-(exwm-input-set-key (kbd "s-g") 'lateci-exwm-ia-map)
-
-;;;;; --- 6. Rechargement de la configuration ---------------------------------
-(defun lateci/exwm-recharger ()
-  "Recharge le fichier d'initialisation sans quitter la session EXWM."
-  (interactive)
-  (load-file user-init-file)
-  (message "Configuration rechargée."))
-
-;;;;; --- 7. Étiquettes which-key --------------------------------------------
-(with-eval-after-load 'which-key
-  (which-key-add-key-based-replacements
-    ;; Préfixes
-    "s-a"     "Applications"
-    "s-y"     "Système"
-    "s-g"     "Assistant IA"
-    ;; Applications
-    "s-a t"   "terminal X11"
-    "s-a e"   "eshell"
-    "s-a i"   "navigateur"
-    "s-a d"   "fichiers"
-    "s-a m"   "courriels"
-    "s-a f"   "flux RSS"
-    "s-a a"   "agenda"
-    "s-a c"   "capture"
-    "s-a p"   "processus"
-    "s-a v"   "musique"
-    ;; Système
-    "s-y q"   "éteindre"
-    "s-y r"   "redémarrer"
-    "s-y z"   "veille"
-    "s-y l"   "verrouiller"
-    "s-y g"   "déverrouiller GPG"
-    "s-y G"   "verrouiller GPG"
-    "s-y m"   "monter club1"
-    "s-y M"   "démonter club1"
-    "s-y s"   "synchro活 activer"
-    "s-y S"   "synchro désactiver"
-    "s-y u"   "guix pull"
-    "s-y i"   "interface Guix"
-    ;; Assistant IA
-    "s-g q"   "question ponctuelle"
-    "s-g t"   "dialogue suivi"
-    "s-g T"   "réinitialiser le fil"
-    "s-g y"   "copier la réponse"
-    "s-g b"   "réponse en Org"
-    "s-g g"   "nouvelle session"
-    "s-g RET" "envoyer"
-    "s-g SPC" "menu gptel"
-    "s-g c"   "corriger la région"
-    "s-g e"   "rédiger un courriel"
-    "s-g r"   "réécrire"
-    "s-g a"   "ajouter au contexte"
-    "s-g x"   "vider le contexte"
-    "s-g s"   "directive"
-    "s-g m"   "modèle"
-    "s-g g"   "modèle par défaut"
-    "s-g ?"   "état"))
 
 (exwm-wm-mode)
 
@@ -1256,17 +1051,12 @@
 ;; elfeed
 (use-package elfeed
   :bind
-  ;; Raccourcis globaux
-  (("C-c w E" . elfeed)
-   ("C-c w u" . elfeed-update)
-   ;; Raccourcis spécifiques à la liste de recherche
-   :map elfeed-search-mode-map
-   ("c" . lateci/denote-elfeed-capture)
-   ("d" . lateci/elfeed-yt-dlp-audio)
-   ;; Raccourcis spécifiques à la lecture d'un article
+  (:map elfeed-search-mode-map
+   ("c" . usr-flux-capturer)
+   ("d" . usr-flux-telecharger-audio)
    :map elfeed-show-mode-map
-   ("c" . lateci/denote-elfeed-capture)
-   ("d" . lateci/elfeed-yt-dlp-audio))
+   ("c" . usr-flux-capturer)
+   ("d" . usr-flux-telecharger-audio))
    
   :custom
   (elfeed-search-face-alist '((unread . (font-lock-keyword-face bold))))
@@ -1276,7 +1066,7 @@
   
   :config
   ;; --- 1. Capture vers Denote (Format feed-auteur-titre) ---
-  (defun lateci/denote-elfeed-capture ()
+  (defun usr-flux-capturer ()
     "Crée une note Denote à partir de l'article Elfeed (Source + Auteur)."
     (interactive)
     (let* ((entry (if (eq major-mode 'elfeed-show-mode)
@@ -1308,7 +1098,7 @@
 
 
   ;; --- 2. Téléchargement Audio via yt-dlp (Format feed-auteur-titre) ---
-  (defun lateci/elfeed-yt-dlp-audio ()
+  (defun usr-flux-telecharger-audio ()
     "Télécharge le flux audio via yt-dlp de manière invisible avec spinner."
     (interactive)
     (let* ((entry (if (eq major-mode 'elfeed-show-mode)
@@ -1348,7 +1138,7 @@
            (chemin-final (expand-file-name nom-fichier "~/Bureau/")))
            
       (when lien
-        (lateci--start-spinner "Téléchargement audio en cours")
+        (usr--start-spinner "Téléchargement audio en cours")
         
         (let* ((process-connection-type nil)
                (proc (start-process-shell-command
@@ -1369,8 +1159,8 @@
            (lambda (p event)
              (when (memq (process-status p) '(exit signal))
                (if (/= (process-exit-status p) 0)
-                   (lateci--stop-spinner (format "yt-dlp ❌ Échec : %s" (string-trim event)))
-                 (lateci--stop-spinner "yt-dlp ✅ Audio extrait sur le Bureau !"))))))))))
+                   (usr--stop-spinner (format "yt-dlp ❌ Échec : %s" (string-trim event)))
+                 (usr--stop-spinner "yt-dlp ✅ Audio extrait sur le Bureau !"))))))))))
 
 ;; Doc-View
 (use-package doc-view
@@ -1391,27 +1181,19 @@
      ("file"     "Relative or absolute path to attachments" "" )))
   (bibtex-align-at-equal-sign t)
   :config
-  (ews-bibtex-register)
-  :bind
-  (("C-c w b r" . ews-bibtex-register)))
+  (ews-bibtex-register))
 
 ;; Biblio package for adding BibTeX records
-(use-package biblio
-  :bind
-  (("C-c w b b" . ews-bibtex-biblio-lookup)))
+(use-package biblio)
 
 ;; Citar to access bibliographies
 (use-package citar
   :defer t
   :custom
-  (citar-bibliography ews-bibtex-files)
-  :bind
-  (("C-c w b o" . citar-open)))
+  (citar-bibliography ews-bibtex-files))
 
 ;; Easy insertion of weblinks
-(use-package org-web-tools
-  :bind
-  (("C-c w w" . org-web-tools-insert-link-for-url)))
+(use-package org-web-tools)
 
 ;; Emacs Multimedia System
 (use-package emms
@@ -1422,14 +1204,7 @@
   (emms-default-players)
   (emms-mpris-enable)
   :custom
-  (emms-browser-covers #'emms-browser-cache-thumbnail-async)
-  :bind
-  (("C-c w m b" . emms-browser)
-   ("C-c w m e" . emms)
-   ("C-c w m p" . emms-play-playlist )
-   ("<XF86AudioPrev>" . emms-previous)
-   ("<XF86AudioNext>" . emms-next)
-   ("<XF86AudioPlay>" . emms-pause)))
+  (emms-browser-covers #'emms-browser-cache-thumbnail-async))
 
 ;; Denote
 (setq denote-directory "~/Bureau/")
@@ -1445,41 +1220,19 @@
   :hook
   (dired-mode . denote-dired-mode)
   :custom-face
-  (denote-faces-link ((t (:slant italic))))
-  :bind
-  (("C-c w d b" . denote-find-backlink)
-   ("C-c w d d" . denote-date)
-   ("C-c w d l" . denote-find-link)
-   ("C-c w d i" . denote-link-or-create)
-   ("C-c w d k" . denote-rename-file-keywords)
-   ("C-c w d n" . denote)
-   ("C-c w d r" . denote-rename-file)
-   ("C-c w d R" . denote-rename-file-using-front-matter)))
+  (denote-faces-link ((t (:slant italic)))))
 
 ;; Denote auxiliary packages
 (use-package denote-journal)
 
-(use-package denote-org
-  :bind
-  (("C-c w d h" . denote-org-link-to-heading)))
+(use-package denote-org)
 
 (use-package denote-sequence)
-
-;; Consult convenience functions
-(use-package consult
-  :bind
-  (("C-c w h" . consult-org-heading)
-   ("C-c w g" . consult-grep))
-  :config
-  (add-to-list 'consult-preview-allowed-hooks 'visual-line-mode))
 
 ;; Consult-Notes for easy access to notes
 (use-package consult-notes
   :custom
   (consult-notes-denote-display-keywords-indicator "_")
-  :bind
-  (("C-c w d f" . consult-notes)
-   ("C-c w d g" . consult-notes-search-in-all-notes))
   :init
   (consult-notes-denote-mode))
 
@@ -1488,47 +1241,15 @@
   :custom
   (citar-open-always-create-notes t)
   :config
-  (citar-denote-mode)
-  :bind
-  (("C-c w b c" . citar-create-note)
-   ("C-c w b n" . citar-denote-open-note)
-   ("C-c w b x" . citar-denote-nocite)
-   :map org-mode-map
-   ("C-c w b k" . citar-denote-add-citekey)
-   ("C-c w b K" . citar-denote-remove-citekey)
-   ("C-c w b d" . citar-denote-dwim)
-   ("C-c w b e" . citar-denote-open-reference-entry)))
+  (citar-denote-mode))
 
 ;; Explore and manage your Denote collection
 
-(use-package denote-explore
-  :bind
-  (;; Statistics
-   ("C-c w x c" . denote-explore-count-notes)
-   ("C-c w x C" . denote-explore-count-keywords)
-   ("C-c w x b" . denote-explore-barchart-keywords)
-   ("C-c w x e" . denote-explore-barchart-filetypes)
-   ;; Random walks
-   ("C-c w x r" . denote-explore-random-note)
-   ("C-c w x l" . denote-explore-random-link)
-   ("C-c w x k" . denote-explore-random-keyword)
-   ("C-c w x x" . denote-explore-random-regex)
-   ;; Denote Janitor
-   ("C-c w x d" . denote-explore-identify-duplicate-notes)
-   ("C-c w x z" . denote-explore-zero-keywords)
-   ("C-c w x s" . denote-explore-single-keywords)
-   ("C-c w x o" . denote-explore-sort-keywords)
-   ("C-c w x w" . denote-explore-rename-keyword)
-   ;; Visualise denote
-   ("C-c w x n" . denote-explore-network)
-   ("C-c w x v" . denote-explore-network-regenerate)
-   ("C-c w x D" . denote-explore-barchart-degree)))
+(use-package denote-explore)
 
 ;; Distraction-free writing
 (use-package darkroom
-  :demand t
-  :bind
-  (("C-c w o" . darkroom-mode)))
+  :demand t)
 
 ;; Vundo
 (use-package vundo
@@ -1547,14 +1268,10 @@
 ;; Lookup words in online dictionaries
 (use-package dictionary
   :custom
-  (dictionary-server "dict.org")
-  :bind
-  (("C-c w s d" . dictionary-lookup-definition)))
+  (dictionary-server "dict.org"))
 
 ;; Writegood-Mode for weasel words, passive writing and repeated word detection
 (use-package writegood-mode
-  :bind
-  (("C-c w s r" . writegood-reading-ease))
   :hook
   (text-mode . writegood-mode))
 
@@ -1700,7 +1417,7 @@
 (setq org-read-date-popup-calendar nil)
 
 (with-eval-after-load 'org-agenda
-  (defun my/org-agenda-after-quit (&rest _ignore)
+  (defun usr--agenda-fermer-sources (&rest _ignore)
     "Fermer les buffers sources d'agenda (org-agenda-files) à la fermeture de l'agenda."
     (when (boundp 'org-agenda-files)
       (let* ((agenda-files (org-agenda-files t)) ;; t = truenames
@@ -1714,7 +1431,7 @@
               (kill-buffer buf)))))))
 
   ;; Lancer tout ça après la fermeture de l’agenda (touche `q`)
-  (advice-add 'org-agenda-quit :after #'my/org-agenda-after-quit))
+  (advice-add 'org-agenda-quit :after #'usr--agenda-fermer-sources))
 
 ;;; FILE MANAGEMENT ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
@@ -1741,7 +1458,7 @@
   :config
   (filechooser-start))
 
-(defun vider-la-corbeille ()
+(defun usr-corbeille-vider ()
   "Vider la corbeille FreeDesktop (~/.local/share/Trash/{files,info})."
   (interactive)
   (when (yes-or-no-p "Vider définitivement la corbeille ? ")
@@ -1774,9 +1491,7 @@
   :config
   (recentf-mode t)
   :custom
-  (recentf-max-saved-items 50)
-  :bind
-  (("C-c w r" . recentf-open)))
+  (recentf-max-saved-items 50))
 
 ;;;; Bookmarks
 (use-package bookmark
@@ -1799,13 +1514,9 @@
 
 (use-package image-dired
   :bind
-  (("C-c w I" . image-dired)
   (:map image-dired-thumbnail-mode-map
         ("C-<right>" . image-dired-display-next)
-        ("C-<left>"  . image-dired-display-previous))))
-
-;;;; Bind key for customising variables
-(keymap-global-set "C-c w v" 'customize-variable)
+        ("C-<left>"  . image-dired-display-previous)))
 
 ;;;; Custom settings in a separate file and load the custom settings
 (setq-default custom-file (expand-file-name
@@ -1822,15 +1533,15 @@
  '((dot . t)))
 
 ;;;; org-export-latex-pdf-export-dir 
-(defvar org-latex-export-destination-table (make-hash-table :test 'equal)
+(defvar usr--export-pdf-destinations (make-hash-table :test 'equal)
   "Table de correspondance fichier Org → dernier dossier d’export PDF choisi.")
 
-(defun org-latex-export-to-pdf-choose-dir (dir)
+(defun usr-export-pdf-vers (dir)
   "Exporter le buffer Org en PDF puis déplacer le fichier dans DIR.
 Se souvient du dernier dossier utilisé pour ce fichier Org."
   (interactive
    (let* ((org-file  (buffer-file-name))
-          (last-dir  (gethash org-file org-latex-export-destination-table))
+          (last-dir  (gethash org-file usr--export-pdf-destinations))
           (start-dir (or last-dir default-directory)))
      ;; Ici, `start-dir` est utilisé comme dossier de départ ET valeur initiale.
      (list (read-directory-name
@@ -1841,7 +1552,7 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
             nil))))     ; pas de texte initial supplémentaire
 
   ;; Mémoriser le dossier choisi pour ce fichier Org
-  (puthash (buffer-file-name) dir org-latex-export-destination-table)
+  (puthash (buffer-file-name) dir usr--export-pdf-destinations)
 
   (let* ((pdf-file (org-latex-export-to-pdf))
          (basename (file-name-nondirectory pdf-file))
@@ -1908,68 +1619,33 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
         notmuch-hello-logo nil))
 
 ;; --- ANIMATION DE CHARGEMENT (SPINNER) OPTIMISÉE ---
-(defvar lateci--spinner-timer nil)
-(defvar lateci--spinner-frames '("[-]" "[\\]" "[|]" "[/]" "[-]" "[\\]" "[|]" "[/]"))
-(defvar lateci--spinner-index 0)
+(defvar usr--spinner-timer nil)
+(defvar usr--spinner-frames '("[-]" "[\\]" "[|]" "[/]" "[-]" "[\\]" "[|]" "[/]"))
+(defvar usr--spinner-index 0)
 
-(defun lateci--start-spinner (texte)
+(defun usr--start-spinner (texte)
   "Démarre une animation uniquement dans le minibuffer sans polluer *Messages*."
-  (when lateci--spinner-timer (cancel-timer lateci--spinner-timer))
-  (setq lateci--spinner-index 0)
-  (setq lateci--spinner-timer
+  (when usr--spinner-timer (cancel-timer usr--spinner-timer))
+  (setq usr--spinner-index 0)
+  (setq usr--spinner-timer
         (run-with-timer 0 0.2
                         (lambda ()
                           (let ((inhibit-quit t)
                                 (message-log-max nil)) ;; <-- Empêche l'écriture de la frame dans *Messages*
-                            (message "%s %s" texte (nth lateci--spinner-index lateci--spinner-frames))
-                            (setq lateci--spinner-index (mod (1+ lateci--spinner-index) (length lateci--spinner-frames))))))))
+                            (message "%s %s" texte (nth usr--spinner-index usr--spinner-frames))
+                            (setq usr--spinner-index (mod (1+ usr--spinner-index) (length usr--spinner-frames))))))))
 
-(defun lateci--stop-spinner (texte-fin)
+(defun usr--stop-spinner (texte-fin)
   "Arrête l'animation et affiche le message final (qui sera lui bien historisé)."
-  (when lateci--spinner-timer
-    (cancel-timer lateci--spinner-timer)
-    (setq lateci--spinner-timer nil))
+  (when usr--spinner-timer
+    (cancel-timer usr--spinner-timer)
+    (setq usr--spinner-timer nil))
   (message "%s" texte-fin))
 
-;; --- FONCTIONS DE SYNCHRONISATION SILENCIEUSE (AVEC LOGS) ---
-
-(defun lateci--lancer-mbsync-seul ()
-  "Lance mbsync silencieusement, conserve les logs, et met à jour la BDD sans ouvrir Notmuch."
-  (lateci--start-spinner "Récupération des courriels")
-  
-  (let* ((process-connection-type nil)
-         (proc (start-process-shell-command "mbsync-boite" " *mbsync-log*" "mbsync -a")))
-    
-    ;; Maintien strict de ton filtre pour écrire dans *Messages*
-    (set-process-filter 
-     proc 
-     (lambda (process output)
-       (let ((texte (string-trim output)))
-         (when (> (length texte) 0)
-           (let ((inhibit-message t))
-             (message "[mbsync] %s" texte))))))
-
-    (set-process-sentinel
-     proc
-     (lambda (p event)
-       (when (memq (process-status p) '(exit signal))
-         (if (/= (process-exit-status p) 0)
-             (lateci--stop-spinner (format "Échec mbsync : %s" (string-trim event)))
-           (progn
-             (lateci--stop-spinner "Synchronisation terminée !")
-             ;; Met à jour Notmuch en arrière-plan
-             (when (fboundp 'notmuch-poll)
-               (let ((inhibit-message t)) 
-                 (message "Lancement de notmuch-poll…"))
-               (notmuch-poll))
-             (when (fboundp 'notmuch-hello-update)
-               (when-let ((buf (get-buffer "*notmuch-hello*")))
-                 (with-current-buffer buf (notmuch-hello-update)))))))))))
-
-(defun mbx-sync ()
+(defun usr-courriel-synchroniser ()
   "Lance mbsync manuellement avec animation, puis met à jour Notmuch."
   (interactive)
-  (lateci--start-spinner "Récupération des courriels")
+  (usr--start-spinner "Récupération des courriels")
   (let* ((process-connection-type nil)
          (proc (start-process-shell-command "mbsync-boite" " *mbsync-log*" "mbsync -a")))
     
@@ -1986,36 +1662,24 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
      (lambda (p event)
        (when (memq (process-status p) '(exit signal))
          (if (/= (process-exit-status p) 0)
-             (lateci--stop-spinner (format "Échec mbsync : %s" (string-trim event)))
+             (usr--stop-spinner (format "Échec mbsync : %s" (string-trim event)))
            (progn
-             (lateci--stop-spinner "mise à jours des xcourriels terminée !")
+             (usr--stop-spinner "mise à jours des xcourriels terminée !")
              (when (fboundp 'notmuch-poll)
                (notmuch-poll))
              (when (fboundp 'notmuch-hello-update)
                (when-let ((buf (get-buffer "*notmuch-hello*")))
                  (with-current-buffer buf (notmuch-hello-update)))))))))))
 
-(defun notmuch-open-unread-teci ()
+(defun usr-courriel-nouveaux ()
   "Ouvre les courriels non lus du Terrain d'Expérimentation de Créations et d'Initiative."
   (interactive)
   (notmuch-search "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"))
 
-(defun notmuch-open-inbox-teci ()
+(defun usr-courriel-boite ()
   "Ouvre la boite de réception globale."
   (interactive)
   (notmuch-search "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR groupi@framagroupes.org) AND NOT tag:trash"))
-
-;; --- DÉCLARATION DES RACCOURCIS COURRIELS ---
-(defvar lateci-mail-map (make-sparse-keymap)
-  "Keymap pour la gestion des courriels.")
-(global-set-key (kbd "C-c m") lateci-mail-map)
-
-(define-key lateci-mail-map (kbd "s") #'mbx-sync)                ;; Sync
-(define-key lateci-mail-map (kbd "m") #'notmuch)                 ;; Menu Principal
-(define-key lateci-mail-map (kbd "n") #'notmuch-open-unread-teci) ;; Nouveaux TECI
-(define-key lateci-mail-map (kbd "i") #'notmuch-open-inbox-teci)  ;; Inbox TECI
-(define-key lateci-mail-map (kbd "f") #'notmuch-search)          ;; Chercher (Find)
-(define-key lateci-mail-map (kbd "c") #'notmuch-mua-new-mail)    ;; Écrire (Compose)
 
 ;; ENVOI COURRIEL VIA CLUB1 (SMTP)
 (setq user-full-name "LA TECI"
@@ -2061,7 +1725,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
 
 ;;;; Applications X11 :::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
-(defun exwm-rename-buffer-by-class ()
+(defun usr--exwm-renommer-tampon ()
   "Renomme le buffer EXWM selon la classe de la fenêtre."
   (when (eq major-mode 'exwm-mode)
     (when exwm-class-name
@@ -2075,79 +1739,42 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
         (_
          (exwm-workspace-rename-buffer exwm-class-name))))))
 
-(add-hook 'exwm-manage-finish-hook #'exwm-rename-buffer-by-class)
+(add-hook 'exwm-manage-finish-hook #'usr--exwm-renommer-tampon)
 
 ;;;;; --- Web ---
-(defun icecat ()
+(defun usr-navigateur ()
   (interactive)
   (let ((buf (get-buffer "Icecat")))
     (if (and buf (buffer-live-p buf))
         (exwm-workspace-switch-to-buffer buf)
       (start-process "icecat" nil "icecat"))))
 
-(global-set-key (kbd "C-c i") #'icecat)
-
 ;; Utiliser Luakit comme navigateur par défaut
 (setq browse-url-browser-function 'browse-url-generic)
 (setq browse-url-generic-program "icecat")
 
 
-;;(defun icecat ()
-;;  (interactive)
-;  (let ((buf (get-buffer "²")))
-;    (if (and buf (buffer-live-p buf))
-;        (exwm-workspace-switch-to-buffer buf)
-;      (start-process "icecat" nil "icecat"))))
-
-;(global-set-key (kbd "C-c i") #'icecat)
-
-;;;;; --- XTERM ---
-(defun xterm ()
+;;;;;; --- XTERM ---
+(defun usr-terminal ()
   (interactive)
   (let ((buf (get-buffer "XTerm")))
     (if (and buf (buffer-live-p buf))
         (exwm-workspace-switch-to-buffer buf)
       (start-process "xterm" nil "xterm"))))
 
-(global-set-key (kbd "C-c x") #'xterm)
-(global-set-key (kbd "C-c X") #'eshell)
-
-;;;;; --- SOFFICE ---
-;;(defun soffice ()
-;;  (interactive)
-;;  (let ((buf (get-buffer "soffice")))
-;;    (if (and buf (buffer-live-p buf))
-;;        (exwm-workspace-switch-to-buffer buf)
-;;      (start-process "soffice" nil "soffice"))))
-
-;;(global-set-key (kbd "C-c o") #'soffice)
-
-;;;;; --- SCRIBUS ---
-;;(defun scribus ()
-;;  (interactive)
-;;  (let ((buf (get-buffer "scribus")))
-;;    (if (and buf (buffer-live-p buf))
-;;        (exwm-workspace-switch-to-buffer buf)
-;;      (start-process "scribus" nil "scribus"))))
-
-;;(global-set-key (kbd "C-c p") #'scribus)
-
 ;;;; SSHFS :::::::::::::::::::::::::::::::::::::::::::::::
 
-(defun mount-club1 ()
+(defun usr-club1-monter ()
   "Demande à Shepherd de démarrer le service SSHFS."
   (interactive)
   (start-process "shepherd-sshfs-on" nil "herd" "start" "sshfs-club1")
   (message "Montage de Club1 via Shepherd..."))
 
-(defun umount-club1 ()
+(defun usr-club1-demonter ()
   "Demande à Shepherd d'arrêter le service SSHFS."
   (interactive)
   (start-process "shepherd-sshfs-off" nil "herd" "stop" "sshfs-club1")
   (message "Démontage de Club1 via Shepherd..."))
-
-(global-set-key (kbd "C-c <f7>") #'mount-club1)
-(global-set-key (kbd "C-c S-<f7>") #'umount-club1)
 
 ;;;; SYNCTHING ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 (use-package syncthing
@@ -2157,25 +1784,21 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
   (syncthing-default-server-token
     (string-trim (shell-command-to-string "pass show api/syncthing"))))
 
-(defun st-on ()
+(defun usr-syncthing-demarrer ()
   "Démarre Syncthing via le gestionnaire de services Shepherd."
   (interactive)
   (start-process "shepherd-st-on" nil "herd" "start" "syncthing")
   (message "Démarrage de Syncthing")
   ;; Force la mise à jour de la modeline après une seconde
-  (run-at-time "1 sec" nil #'lateci--verifier-systeme))
+  (run-at-time "1 sec" nil #'usr--verifier-systeme))
 
-(defun st-off ()
+(defun usr-syncthing-arreter ()
   "Arrête Syncthing via le gestionnaire de services Shepherd."
   (interactive)
   (start-process "shepherd-st-off" nil "herd" "stop" "syncthing")
   (message " Arrêt de Syncthing")
-  (run-at-time "1 sec" nil #'lateci--verifier-systeme))
+  (run-at-time "1 sec" nil #'usr--verifier-systeme))
  
-(global-set-key (kbd "C-c s s") #'st-on)
-(global-set-key (kbd "C-c s S") #'st-off)
-(global-set-key (kbd "C-c s c") #'syncthing)
-
 ;;;; GnuPG + PINENTRY :::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 (use-package pinentry
   :init
@@ -2187,7 +1810,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
   (setq epa-pinentry-mode 'loopback)
   (pinentry-start))
 
-(defun gpg-unlock-teci ()
+(defun usr-gpg-deverrouiller ()
   (interactive)
   (let ((file (expand-file-name "~/.gnupg/.verrou.gpg"))
         (ctx (epg-make-context 'OpenPGP))
@@ -2200,31 +1823,29 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
       (if succes
           (progn
             (message "Clé GPG déverrouillée.")
-            (lateci--verifier-systeme))
+            (usr--verifier-systeme))
         (message "Échec GPG : Mot de passe incorrect ou annulé.")))))
 
-(defun gpg-lock-teci ()
+(defun usr-gpg-verrouiller ()
   (interactive)
   (let ((bin (executable-find "gpgconf")))
     (when (and bin (numberp (call-process bin nil nil nil "--kill" "gpg-agent")))
       (message "clé gpg est vérouillé")
-      (setq lateci--gpg-unlocked nil)
-      (lateci--actualiser-affichage))))
+      (setq usr--gpg-unlocked nil)
+      (usr--actualiser-affichage))))
 
-(global-set-key (kbd "C-c g u") #'gpg-unlock-teci)
-(global-set-key (kbd "C-c g l") #'gpg-lock-teci)
 
 
 ;;;;  MODE KIOSK LA TECI (CORRIGÉ) ---
-(defvar lateci/kiosk-url "https://lateci.club1.fr/accueil.html"
+(defvar usr-kiosque-url "https://lateci.club1.fr/accueil.html"
   "L'adresse du site autorisé pour le mode kiosk.")
 
-(defun ksk-on ()
+(defun usr-kiosque-activer ()
   (interactive)
   (message "Activation du mode Kiosk...")
-  (start-process "icecat-kiosk" nil "icecat" "--kiosk" lateci/kiosk-url))
+  (start-process "icecat-kiosk" nil "icecat" "--kiosk" usr-kiosque-url))
 
-(defun ksk-off ()
+(defun usr-kiosque-desactiver ()
   (interactive)
   (let ((proc (get-process "icecat-kiosk")))
     (if proc
@@ -2233,28 +1854,26 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
           (message "Mode Kiosk désactivé."))
       (message "Le processus Kiosk n'a pas été trouvé."))))
 
-(exwm-input-set-key (kbd "s-C-k") #'ksk-on)   
-(exwm-input-set-key (kbd "s-C-K") #'ksk-off) 
 
 ;;; ASSISTANT IA (gptel) ::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
-(defun lateci--anthropic-key ()
+(defun usr--cle-anthropic ()
   (string-trim (shell-command-to-string "pass show api/claude")))
 
-(defun lateci--gemini-key ()
+(defun usr--cle-gemini ()
   (string-trim (shell-command-to-string "pass show api/gemini")))
 
-(defun lateci--openai-key ()
+(defun usr--cle-openai ()
   (string-trim (shell-command-to-string "pass show api/openai")))
 
-(defvar lateci-gptel-modele-rapide 'claude-haiku-4-5)
+(defvar usr-ia-modele-rapide 'claude-haiku-4-5)
 
-(defun lateci/corriger-region (debut fin &optional systeme)
+(defun usr-ia-corriger (debut fin &optional systeme)
   "Corrige la région en place. SYSTEME optionnel remplace la directive."
   (interactive "r")
   (let ((texte (buffer-substring-no-properties debut fin))
         (buf (current-buffer)))
-    (lateci--start-spinner "Correction")
+    (usr--start-spinner "Correction")
     (gptel-request texte
       :system (or systeme
                   "Corrige grammaire, orthographe, syntaxe et lourdeurs en français. Conserve le balisage Org et LaTeX à l'identique. Ne change pas le sens ni le ton. Renvoie UNIQUEMENT le texte corrigé, sans commentaire.")
@@ -2262,23 +1881,23 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
       :callback
       (lambda (reponse info)
         (if (not (stringp reponse))
-            (lateci--stop-spinner (format "Échec : %s" (plist-get info :status)))
+            (usr--stop-spinner (format "Échec : %s" (plist-get info :status)))
           (pcase-let ((`(,d ,f ,b) (plist-get info :context)))
             (with-current-buffer b
               (save-excursion
                 (delete-region d f)
                 (goto-char d)
                 (insert reponse))))
-          (lateci--stop-spinner "Terminé."))))))
+          (usr--stop-spinner "Terminé."))))))
 
-(defun lateci/courriel-region (debut fin)
+(defun usr-ia-courriel (debut fin)
   "Développe des notes en courriel associatif."
   (interactive "r")
-  (lateci/corriger-region
+  (usr-ia-corriger
    debut fin
    "Développe ces notes en courriel associatif français : ton cordial et sobre, court, formule de politesse. Renvoie uniquement le corps du courriel."))
 
-(defun lateci/expliquer-erreur ()
+(defun usr-ia-diagnostiquer ()
   "Envoie le buffer courant (backtrace, log, sortie Guix) pour diagnostic."
   (interactive)
   (let ((extrait (buffer-substring-no-properties
@@ -2291,12 +1910,12 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
                       (erase-buffer) (org-mode) (insert r)
                       (pop-to-buffer (current-buffer))))))))
 
-(defun lateci/gptel-context-clear ()
+(defun usr-ia-contexte-vider ()
   (interactive)
   (gptel-context-remove-all)
   (message "Contexte gptel vidé."))
 
-(defun lateci/gptel-toggle-web ()
+(defun usr-ia-recherche-web ()
   "Bascule le backend Anthropic avec recherche web serveur."
   (interactive)
   (if (eq gptel-backend gptel--backend-anthropic-web)
@@ -2308,21 +1927,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
 (use-package gptel
   :ensure nil
   :defer t
-  :bind
-  (("C-c w a n" . gptel)
-   ("C-c w a s" . gptel-send)
-   ("C-c w a m" . gptel-menu)
-   ("C-c w a a" . gptel-add)
-   ("C-c w a f" . gptel-add-file)
-   ("C-c w a r" . gptel-rewrite)
-   ("C-c w a c" . lateci/corriger-region)
-   ("C-c w a d" . lateci/expliquer-erreur)
-   ("C-c w a x" . lateci/gptel-context-clear)
-   ("C-c w a W" . lateci/gptel-toggle-web))
   :init
-  (with-eval-after-load 'which-key
-    (which-key-add-key-based-replacements "C-c w a" "Assistant IA"))
-
   :config
   (setq gptel-default-mode 'org-mode
         gptel-max-tokens 4096
@@ -2332,7 +1937,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
   ;; --- Backends ---
   (defvar gptel--backend-anthropic
     (gptel-make-anthropic "anthropic"
-      :key #'lateci--anthropic-key
+      :key #'usr--cle-anthropic
       :stream t
       :models '(claude-fable-5
                 claude-opus-5
@@ -2341,7 +1946,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
 
   (defvar gptel--backend-anthropic-web
     (gptel-make-anthropic "anthropic-web"
-      :key #'lateci--anthropic-key
+      :key #'usr--cle-anthropic
       :stream t
       :models '(claude-haiku-4-5 claude-sonnet-5 claude-opus-5)
       :request-params
@@ -2355,7 +1960,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
 
   (defvar gptel--backend-gemini
     (gptel-make-gemini "gemini"
-      :key #'lateci--gemini-key
+      :key #'usr--cle-gemini
       :stream t
       :models '(gemini-3.5-flash-light
                 gemini-3.6-flash
@@ -2367,7 +1972,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
 
     (defvar gptel--backend-openai
     (gptel-make-openai "openai"
-      :key #'lateci--openai-key
+      :key #'usr--cle-openai
       :stream t
       :models '(gpt-5.6-sol
                 gpt-5.6-terra
@@ -2379,7 +1984,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
 
   
   ;; --- Outils ---
-  (defvar lateci--outil-notes
+  (defvar usr--ia-outil-notes
     (gptel-make-tool
      :name "rechercher_notes_lateci"
      :description "Recherche un mot-clé dans la base Denote (fichiers Org)."
@@ -2391,7 +1996,7 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
                     (format "rg -i --no-heading --max-columns 200 --max-count 5 %s *.org | head -c 8000"
                             (shell-quote-argument requete)))))))
 
-  (defvar lateci--outil-note-lire
+  (defvar usr--ia-outil-lire
     (gptel-make-tool
      :name "lire_fichier_note"
      :description "Lit le contenu d'un fichier Org spécifique."
@@ -2406,17 +2011,15 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
                            (substring texte 0 (min 12000 (length texte)))))
                      "Fichier introuvable.")))))
 
-  (defun lateci/gptel-outils (jeu)
+  (defun usr-ia-outils (jeu)
     "Active un JEU d'outils : notes ou aucun."
     (interactive (list (intern (completing-read "Outils : " '("notes" "aucun") nil t))))
     (setq gptel-tools
           (pcase jeu
-            ('notes (list lateci--outil-notes lateci--outil-note-lire))
+            ('notes (list usr--ia-outil-notes usr--ia-outil-lire))
             ('aucun nil))
           gptel-use-tools (not (null gptel-tools)))
     (message "Outils gptel : %s" jeu))
-  (define-key gptel-mode-map (kbd "C-c w a o") #'lateci/gptel-outils)
-
   ;; --- Directives ---
   (setf (alist-get 'default gptel-directives)
         "Tu es un grand modèle linguistique vivant dans GUIX OS / EXWM / Emacs. Sois concis, expert en Scheme, Lisp, Org-mode et LaTeX.")
@@ -2443,39 +2046,37 @@ Aucune connaissance externe. Concis, cite le document source.")
   (setf (alist-get 'code gptel-directives)
         "Expert Emacs Lisp, Guile Scheme, Org, LaTeX et Guix. Renvoie uniquement le code demandé dans un bloc, commentaire uniquement sur demande. Aucune explication hors bloc."))
 
-(with-eval-after-load 'message
-  (define-key message-mode-map (kbd "C-c w a e") #'lateci/courriel-region))
   
 
 ;;;; DIALOGUE GPTEL DEPUIS LE MINIBUFFER ::::::::::::::::::::::::::::::::::::::
 
 ;; --- État isolé : historique, fil, directive, backend/modèle, dernière réponse ---
-(defvar lateci--gptel-mb-history nil
+(defvar usr--ia-historique nil
   "Historique des invites saisies au minibuffer.")
 
-(defvar lateci--gptel-mb-fil nil
+(defvar usr--ia-fil nil
   "Fil de conversation : liste de chaînes alternant utilisateur/assistant.")
 
-(defvar lateci--gptel-mb-derniere nil
+(defvar usr--ia-derniere-reponse nil
   "Dernière réponse reçue, conservée pour récupération ultérieure.")
 
-(defvar lateci-gptel-mb-buffer "*gptel-réponse*"
+(defvar usr-ia-tampon-reponse "*gptel-réponse*"
   "Nom du buffer d'affichage des réponses longues.")
 
-(defvar lateci-gptel-mb-directive 'concis
+(defvar usr-ia-directive-courante 'concis
   "Directive propre aux commandes minibuffer (clé de `gptel-directives').")
 
-(defvar lateci-gptel-mb-backend nil
+(defvar usr-ia-backend-courant nil
   "Backend propre au minibuffer ; nil = backend global de gptel.")
 
-(defvar lateci-gptel-mb-model nil
+(defvar usr-ia-modele-courant nil
   "Modèle propre au minibuffer ; nil = modèle global de gptel.")
 
-(defvar lateci-gptel-mb-seuil-echo 300
+(defvar usr-ia-seuil-echo 300
   "Longueur maximale d'une réponse affichée en écho dans le minibuffer.")
 
 ;; --- Choix de la directive ---
-(defun lateci/gptel-mb-directive (nom)
+(defun usr-ia-directive (nom)
   "Sélectionne la directive NOM pour les commandes gptel du minibuffer."
   (interactive
    (progn
@@ -2484,12 +2085,12 @@ Aucune connaissance externe. Concis, cite le document source.")
                     "Directive minibuffer : "
                     (mapcar (lambda (c) (symbol-name (car c))) gptel-directives)
                     nil t nil nil
-                    (symbol-name lateci-gptel-mb-directive))))))
-  (setq lateci-gptel-mb-directive nom)
+                    (symbol-name usr-ia-directive-courante))))))
+  (setq usr-ia-directive-courante nom)
   (message "Directive minibuffer : %s" nom))
 
 ;; --- Choix du couple backend/modèle ---
-(defun lateci/gptel-mb-modele ()
+(defun usr-ia-modele ()
   "Sélectionne le backend et le modèle propres au minibuffer."
   (interactive)
   (require 'gptel)
@@ -2503,26 +2104,26 @@ Aucune connaissance externe. Concis, cite le document source.")
                        (gptel-backend-models backend))))
            gptel--known-backends))
          (choix (assoc (completing-read "Modèle minibuffer : " cands nil t) cands)))
-    (setq lateci-gptel-mb-backend (nth 1 choix)
-          lateci-gptel-mb-model   (nth 2 choix))
+    (setq usr-ia-backend-courant (nth 1 choix)
+          usr-ia-modele-courant   (nth 2 choix))
     (message "Modèle minibuffer : %s" (car choix))))
 
 ;; --- Retour au backend/modèle globaux ---
-(defun lateci/gptel-mb-modele-defaut ()
+(defun usr-ia-modele-defaut ()
   "Rétablit l'usage du backend et du modèle globaux de gptel."
   (interactive)
-  (setq lateci-gptel-mb-backend nil
-        lateci-gptel-mb-model   nil)
+  (setq usr-ia-backend-courant nil
+        usr-ia-modele-courant   nil)
   (message "Minibuffer aligné sur le backend/modèle globaux."))
 
 ;; --- Affichage : écho si court (conservé dans *Messages*), buffer Org sinon ---
-(defun lateci--gptel-mb-afficher (reponse)
-  (setq lateci--gptel-mb-derniere reponse)
-  (if (and (< (length reponse) lateci-gptel-mb-seuil-echo)
+(defun usr--ia-afficher (reponse)
+  (setq usr--ia-derniere-reponse reponse)
+  (if (and (< (length reponse) usr-ia-seuil-echo)
            (not (string-match-p "\n" reponse)))
       (let ((message-log-max t))
         (message "%s" reponse))
-    (with-current-buffer (get-buffer-create lateci-gptel-mb-buffer)
+    (with-current-buffer (get-buffer-create usr-ia-tampon-reponse)
       (let ((inhibit-read-only t))
         (erase-buffer)
         (org-mode)
@@ -2532,37 +2133,37 @@ Aucune connaissance externe. Concis, cite le document source.")
   reponse)
 
 ;; --- Récupération de la dernière réponse ---
-(defun lateci/gptel-mb-recuperer (&optional inserer)
+(defun usr-ia-copier-reponse (&optional inserer)
   "Copie la dernière réponse dans le kill-ring ; avec préfixe, l'insère au point."
   (interactive "P")
-  (if (not lateci--gptel-mb-derniere)
+  (if (not usr--ia-derniere-reponse)
       (message "Aucune réponse en mémoire.")
-    (kill-new lateci--gptel-mb-derniere)
+    (kill-new usr--ia-derniere-reponse)
     (if inserer
-        (insert lateci--gptel-mb-derniere)
-      (message "Réponse copiée (%d caractères)." (length lateci--gptel-mb-derniere)))))
+        (insert usr--ia-derniere-reponse)
+      (message "Réponse copiée (%d caractères)." (length usr--ia-derniere-reponse)))))
 
 ;; --- Ouverture du buffer de réponse ---
-(defun lateci/gptel-mb-buffer ()
+(defun usr-ia-voir-reponse ()
   "Affiche la dernière réponse dans le buffer Org dédié."
   (interactive)
-  (if (not lateci--gptel-mb-derniere)
+  (if (not usr--ia-derniere-reponse)
       (message "Aucune réponse en mémoire.")
-    (with-current-buffer (get-buffer-create lateci-gptel-mb-buffer)
+    (with-current-buffer (get-buffer-create usr-ia-tampon-reponse)
       (let ((inhibit-read-only t))
         (erase-buffer)
         (org-mode)
-        (insert lateci--gptel-mb-derniere)
+        (insert usr--ia-derniere-reponse)
         (goto-char (point-min))))
-    (pop-to-buffer lateci-gptel-mb-buffer)))
+    (pop-to-buffer usr-ia-tampon-reponse)))
 
 ;; --- Question ponctuelle sans mémoire ; préfixe = insertion au point ---
-(defun lateci/gptel-question (invite &optional inserer)
+(defun usr-ia-question (invite &optional inserer)
   "Interroge gptel avec INVITE depuis le minibuffer, sans conserver de fil.
 La région active est jointe à l'invite. Avec INSERER, la réponse est
 insérée au point plutôt qu'affichée."
   (interactive
-   (list (read-string "gptel : " nil 'lateci--gptel-mb-history)
+   (list (read-string "gptel : " nil 'usr--ia-historique)
          current-prefix-arg))
   (require 'gptel)
   (let* ((region (and (use-region-p)
@@ -2574,86 +2175,76 @@ insérée au point plutôt qu'affichée."
          (buf (current-buffer))
          (pos (point))
          ;; Liaisons dynamiques : le payload est bâti ici, l'état global reste intact.
-         (gptel-backend (or lateci-gptel-mb-backend gptel-backend))
-         (gptel-model   (or lateci-gptel-mb-model   gptel-model)))
-    (lateci--start-spinner "gptel")
+         (gptel-backend (or usr-ia-backend-courant gptel-backend))
+         (gptel-model   (or usr-ia-modele-courant   gptel-model)))
+    (usr--start-spinner "gptel")
     (gptel-request texte
-      :system (alist-get lateci-gptel-mb-directive gptel-directives)
+      :system (alist-get usr-ia-directive-courante gptel-directives)
       :callback
       (lambda (reponse info)
         (if (not (stringp reponse))
-            (lateci--stop-spinner (format "Échec : %s" (plist-get info :status)))
-          (lateci--stop-spinner "gptel ✔")
-          (setq lateci--gptel-mb-derniere reponse)
+            (usr--stop-spinner (format "Échec : %s" (plist-get info :status)))
+          (usr--stop-spinner "gptel ✔")
+          (setq usr--ia-derniere-reponse reponse)
           (if inserer
               (with-current-buffer buf
                 (save-excursion (goto-char pos) (insert reponse)))
-            (lateci--gptel-mb-afficher reponse)))))))
+            (usr--ia-afficher reponse)))))))
 
 ;; --- Dialogue suivi : le fil complet est renvoyé à chaque tour ---
-(defun lateci/gptel-dialogue (invite)
+(defun usr-ia-dialogue (invite)
   "Poursuit un dialogue gptel depuis le minibuffer avec INVITE."
   (interactive
-   (list (read-string (if lateci--gptel-mb-fil
+   (list (read-string (if usr--ia-fil
                           "gptel (suite) : "
                         "gptel (nouveau) : ")
-                      nil 'lateci--gptel-mb-history)))
+                      nil 'usr--ia-historique)))
   (require 'gptel)
-  (setq lateci--gptel-mb-fil (append lateci--gptel-mb-fil (list invite)))
-  (let ((gptel-backend (or lateci-gptel-mb-backend gptel-backend))
-        (gptel-model   (or lateci-gptel-mb-model   gptel-model)))
-    (lateci--start-spinner "gptel")
-    (gptel-request (copy-sequence lateci--gptel-mb-fil)
-      :system (alist-get lateci-gptel-mb-directive gptel-directives)
+  (setq usr--ia-fil (append usr--ia-fil (list invite)))
+  (let ((gptel-backend (or usr-ia-backend-courant gptel-backend))
+        (gptel-model   (or usr-ia-modele-courant   gptel-model)))
+    (usr--start-spinner "gptel")
+    (gptel-request (copy-sequence usr--ia-fil)
+      :system (alist-get usr-ia-directive-courante gptel-directives)
       :callback
       (lambda (reponse info)
         (if (not (stringp reponse))
-            (lateci--stop-spinner (format "Échec : %s" (plist-get info :status)))
-          (setq lateci--gptel-mb-fil (append lateci--gptel-mb-fil (list reponse)))
-          (lateci--stop-spinner "gptel ✔")
-          (lateci--gptel-mb-afficher reponse)
+            (usr--stop-spinner (format "Échec : %s" (plist-get info :status)))
+          (setq usr--ia-fil (append usr--ia-fil (list reponse)))
+          (usr--stop-spinner "gptel ✔")
+          (usr--ia-afficher reponse)
           (when (y-or-n-p "Poursuivre le dialogue ? ")
-            (call-interactively #'lateci/gptel-dialogue)))))))
+            (call-interactively #'usr-ia-dialogue)))))))
 
 ;; --- Réinitialisation du fil ---
-(defun lateci/gptel-dialogue-reset ()
+(defun usr-ia-dialogue-reinitialiser ()
   "Vide le fil de conversation du minibuffer."
   (interactive)
-  (setq lateci--gptel-mb-fil nil)
+  (setq usr--ia-fil nil)
   (message "Fil gptel réinitialisé."))
 
 ;; --- État courant ---
-(defun lateci/gptel-mb-etat ()
+(defun usr-ia-etat ()
   "Affiche directive, modèle et longueur du fil du minibuffer."
   (interactive)
   (require 'gptel)
   (message "Directive : %s | Modèle : %s | Fil : %d tour(s) | Réponse : %s"
-           lateci-gptel-mb-directive
-           (gptel--model-name (or lateci-gptel-mb-model gptel-model))
-           (/ (length lateci--gptel-mb-fil) 2)
-           (if lateci--gptel-mb-derniere "en mémoire" "aucune")))
+           usr-ia-directive-courante
+           (gptel--model-name (or usr-ia-modele-courant gptel-model))
+           (/ (length usr--ia-fil) 2)
+           (if usr--ia-derniere-reponse "en mémoire" "aucune")))
 
-;; --- Raccourcis ---
-(keymap-global-set "C-c w a q" #'lateci/gptel-question)
-(keymap-global-set "C-c w a t" #'lateci/gptel-dialogue)
-(keymap-global-set "C-c w a T" #'lateci/gptel-dialogue-reset)
-(keymap-global-set "C-c w a y" #'lateci/gptel-mb-recuperer)
-(keymap-global-set "C-c w a b" #'lateci/gptel-mb-buffer)
-(keymap-global-set "C-c w a D" #'lateci/gptel-mb-directive)
-(keymap-global-set "C-c w a M" #'lateci/gptel-mb-modele)
-(keymap-global-set "C-c w a G" #'lateci/gptel-mb-modele-defaut)
-(keymap-global-set "C-c w a ?" #'lateci/gptel-mb-etat)
 
 ;;; COMPTABILITÉ ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
-(defvar lateci-comptabilite-directory
+(defvar usr-compta-repertoire
   (expand-file-name "~/Bureau/compta/")
   "Répertoire contenant les journaux comptables.")
 
-(defvar lateci-comptabilite-file
+(defvar usr-compta-fichier
   (expand-file-name
    (format "%s.ledger" (format-time-string "%Y"))
-   lateci-comptabilite-directory)
+   usr-compta-repertoire)
   "Journal Ledger de l’exercice courant.")
 
 (use-package ledger-mode
@@ -2687,7 +2278,7 @@ insérée au point plutôt qu'affichée."
    ("bénéficiaires" "%(binary) -f %(ledger-file) payees")))
 
   :config
-(setq ledger-master-file lateci-comptabilite-file)
+(setq ledger-master-file usr-compta-fichier)
 
 (add-hook 'ledger-mode-hook
           (lambda ()
@@ -2699,13 +2290,13 @@ insérée au point plutôt qu'affichée."
         ("C-c C-r" . ledger-report)
         ("C-c C-c" . ledger-mode-clean-buffer)))
 
-(defun lateci/comptabilite ()
+(defun usr-compta-ouvrir ()
   "Ouvre le journal comptable de l'exercice courant."
   (interactive)
-  (make-directory lateci-comptabilite-directory t)
-  (find-file lateci-comptabilite-file))
+  (make-directory usr-compta-repertoire t)
+  (find-file usr-compta-fichier))
 
-(defun lateci/comptabilite-verifier ()
+(defun usr-compta-verifier ()
   "Vérifie l'équilibre et la syntaxe du journal courant."
   (interactive)
   (unless (derived-mode-p 'ledger-mode)
@@ -2717,15 +2308,15 @@ insérée au point plutôt qu'affichée."
    'compilation-mode
    (lambda (_) "*Vérification comptable*")))
 
-(defun lateci/comptabilite-export-csv ()
+(defun usr-compta-exporter ()
   "Exporte le registre comptable courant au format CSV."
   (interactive)
-  (let* ((journal lateci-comptabilite-file)
+  (let* ((journal usr-compta-fichier)
          (destination
           (expand-file-name
            (format-time-string "%Y-registre.csv")
-           lateci-comptabilite-directory)))
-    (make-directory lateci-comptabilite-directory t)
+           usr-compta-repertoire)))
+    (make-directory usr-compta-repertoire t)
     (unless (file-exists-p journal)
       (user-error "Journal inexistant : %s" journal))
     (with-temp-file destination
@@ -2738,21 +2329,537 @@ insérée au point plutôt qu'affichée."
     (message "Registre exporté : %s" destination)
     (find-file destination)))
 
-;; Préfixe comptabilité : C-c $
-(defvar-keymap lateci-comptabilite-map
-  :doc "Commandes de comptabilité."
-  "o" #'lateci/comptabilite
-  "v" #'lateci/comptabilite-verifier
-  "r" #'ledger-report
-  "e" #'lateci/comptabilite-export-csv)
 
-(keymap-global-set "C-c $" lateci-comptabilite-map)
 
-(with-eval-after-load 'which-key
-  (which-key-add-key-based-replacements
-    "C-c $"   "Comptabilité"
-    "C-c $ o" "ouvrir le journal"
-    "C-c $ v" "vérifier le journal"
-    "C-c $ r" "rapports"
-    "C-c $ e" "exporter en CSV"))
+;;; RACCOURCIS ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+;;
+;; Une seule porte d'entrée : s-SPC (C-c SPC en secours, hors session X).
+;; C'est le SEUL endroit du fichier où une touche globale est déclarée ; les
+;; tables propres aux modes (org, ledger, dired, notmuch, elfeed, image) et
+;; les idiomes Emacs standards (C-x b, C-x m, C-h f, C-;, C-M-/) restent
+;; définis auprès de leur paquet.
+;;
+;;   s-SPC          le menu
+;;   s-<flèches>    déplacement entre fenêtres
+;;   s-<tab>        plein écran
+;;   touches XF86   volume, lecture, luminosité
+;;
+;; Tout le reste passe par le menu.
 
+(require 'transient)
+
+;;;; --- Commandes d'appoint --------------------------------------------------
+
+(defun usr-configuration-recharger ()
+  "Recharge le fichier d'initialisation sans quitter la session EXWM."
+  (interactive)
+  (load-file user-init-file)
+  (message "Configuration rechargée."))
+
+(defun usr-configuration-editer ()
+  "Ouvre le fichier d'initialisation."
+  (interactive)
+  (find-file user-init-file))
+
+(defun usr-ecran-verrouiller ()
+  "Verrouille l'écran avec slock."
+  (interactive)
+  (let ((slock (or (executable-find "slock")
+                   (and (file-executable-p "/run/setuid-programs/slock")
+                        "/run/setuid-programs/slock"))))
+    (if slock
+        (start-process "slock" nil slock)
+      (user-error "slock est introuvable"))))
+
+(defun usr-guix-mettre-a-jour ()
+  "Lance « guix pull » dans un tampon de compilation."
+  (interactive)
+  (compilation-start "guix pull" nil (lambda (_) "*guix pull*")))
+
+(defun usr-agenda-trois-jours ()
+  "Ouvre la vue d'agenda « trois jours, actions et attentes »."
+  (interactive)
+  (org-agenda nil "e"))
+
+(defun usr-journal-du-jour ()
+  "Ouvre ou crée l'entrée de journal interstitiel du jour."
+  (interactive)
+  (org-capture nil "j"))
+
+(defun usr-tache-todo ()
+  "Capture une nouvelle tâche TODO."
+  (interactive)
+  (org-capture nil "t"))
+
+(defun usr-tache-suivante ()
+  "Capture une action NEXT."
+  (interactive)
+  (org-capture nil "i"))
+
+(defun usr-rendez-vous ()
+  "Capture un rendez-vous."
+  (interactive)
+  (org-capture nil "r"))
+
+(defun usr-facturation-devis ()
+  "Crée un devis à partir du modèle LaTeX de l'association."
+  (interactive)
+  (org-capture nil "d"))
+
+(defun usr-facturation-facture ()
+  "Crée une facture à partir du modèle LaTeX de l'association."
+  (interactive)
+  (org-capture nil "F"))
+
+(defun usr-facturation-recu ()
+  "Crée un reçu à partir du modèle LaTeX de l'association."
+  (interactive)
+  (org-capture nil "u"))
+
+;;;; --- Socle transient ------------------------------------------------------
+
+;; Le menu s'affiche dans une fenêtre latérale basse : sous EXWM, une fenêtre
+;; X11 occupant tout le cadre se rétrécit au lieu d'avaler le menu.
+(setq transient-display-buffer-action
+      '(display-buffer-in-side-window
+        (side . bottom)
+        (dedicated . t)
+        (inhibit-same-window . t)))
+(setq transient-mode-line-format nil)
+
+;; --- Parade au mode caractère d'EXWM ---
+;; En mode ligne, Emacs garde le focus X et voit toutes les touches : le menu
+;; fonctionne normalement. En mode caractère, le client X détient le focus et
+;; seules les touches saisies par `exwm-input-set-key' remontent — la touche
+;; qui suit s-SPC partirait donc dans le client. On rend donc le clavier à
+;; Emacs le temps du menu, et on le restitue à la fermeture.
+
+(defvar usr--tampon-mode-char nil
+  "Tampon EXWM dont le mode caractère doit être rétabli après le menu.")
+
+(defun usr--clavier-emprunter ()
+  "Rend le clavier à Emacs si le tampon courant est une fenêtre X11 en mode caractère."
+  (when (and (derived-mode-p 'exwm-mode)
+             (eq (bound-and-true-p exwm--input-mode) 'char-mode)
+             (fboundp 'exwm-input-grab-keyboard))
+    (setq usr--tampon-mode-char (current-buffer))
+    (exwm-input-grab-keyboard)))
+
+(defun usr--clavier-restituer ()
+  "Rétablit le mode caractère emprunté par `usr--clavier-emprunter'."
+  (when (buffer-live-p usr--tampon-mode-char)
+    (with-current-buffer usr--tampon-mode-char
+      (when (fboundp 'exwm-input-release-keyboard)
+        (exwm-input-release-keyboard))))
+  (setq usr--tampon-mode-char nil))
+
+;; `transient-exit-hook' ne se déclenche qu'à la fermeture complète de la
+;; pile : les sous-menus ne restituent donc pas le clavier prématurément.
+(add-hook 'transient-exit-hook #'usr--clavier-restituer)
+
+(defun usr-menu-ouvrir ()
+  "Ouvre le menu principal, y compris depuis une fenêtre X11 en mode caractère."
+  (interactive)
+  (usr--clavier-emprunter)
+  (call-interactively #'usr-menu))
+
+;;;; --- Descriptions vivantes de l'assistant ---------------------------------
+
+(defun usr--ia-desc-directive ()
+  (format "directive     : %s" (or usr-ia-directive-courante "—")))
+
+(defun usr--ia-desc-modele ()
+  (format "modèle        : %s"
+          (let ((m (or usr-ia-modele-courant (bound-and-true-p gptel-model))))
+            (cond ((and m (fboundp 'gptel--model-name)) (gptel--model-name m))
+                  (m (format "%s" m))
+                  (t "—")))))
+
+(defun usr--ia-desc-outils ()
+  (format "outils        : %s"
+          (if (bound-and-true-p gptel-tools) "notes" "aucun")))
+
+(defun usr--ia-desc-web ()
+  (format "recherche web : %s"
+          (if (and (boundp 'gptel-backend)
+                   (boundp 'gptel--backend-anthropic-web)
+                   (eq gptel-backend gptel--backend-anthropic-web))
+              "activée"
+            "désactivée")))
+
+(defun usr--ia-desc-fil ()
+  (format "fil           : %d tour(s)" (/ (length usr--ia-fil) 2)))
+
+;;;; --- Menus ----------------------------------------------------------------
+
+(transient-define-prefix usr-menu-applications ()
+  "Lancer ou rejoindre une application."
+  [["Terminaux"
+    ("t" "terminal (XTerm)" usr-terminal)
+    ("e" "eshell"           eshell)
+    ("p" "processus"        proced)]
+   ["Bureau"
+    ("f" "fichiers (Dired)" dired)
+    ("n" "navigateur"       usr-navigateur)
+    ("k" "mode kiosque"     usr-kiosque-activer)
+    ("K" "quitter le kiosque" usr-kiosque-desactiver)]
+   ["Média"
+    ("m" "musique"          emms)
+    ("b" "bibliothèque musicale" emms-browser)
+    ("l" "liste de lecture" emms-play-playlist)
+    ("i" "images"           image-dired)
+    ("r" "flux RSS"         elfeed)]
+   ["Services"
+    ("s" "interface Syncthing" syncthing)]])
+
+(transient-define-prefix usr-menu-fenetres ()
+  "Disposition des fenêtres et tampons."
+  [["Disposition"
+    ("h" "scinder en bas"    split-window-below)
+    ("v" "scinder à droite"  split-window-right)
+    ("0" "fermer la fenêtre" delete-window)
+    ("1" "fermer les autres" delete-other-windows)
+    ("=" "équilibrer"        balance-windows)]
+   ["Naviguer"
+    ("<left>"  "à gauche"    windmove-left)
+    ("<right>" "à droite"    windmove-right)
+    ("<up>"    "au-dessus"   windmove-up)
+    ("<down>"  "en dessous"  windmove-down)]
+   ["Tampons"
+    ("<" "précédent"         previous-buffer)
+    (">" "suivant"           next-buffer)
+    ("r" "fichiers récents…" recentf-open)]
+   ["Fenêtre X11"
+    ("p" "plein écran"       exwm-layout-toggle-fullscreen)
+    ("M" "mode ligne / caractère" exwm-input-toggle-keyboard)
+    ("w" "bureau…"           exwm-workspace-switch)
+    ("W" "nouveau bureau"    exwm-workspace-switch-create)]])
+
+(transient-define-prefix usr-menu-organisation ()
+  "Agenda, capture et calendrier."
+  [["Agenda"
+    ("a" "agenda"              org-agenda)
+    ("A" "vue « trois jours »" usr-agenda-trois-jours)
+    ("j" "journal du jour"     usr-journal-du-jour)]
+   ["Capturer"
+    ("c" "capture…"            org-capture)
+    ("t" "nouvelle tâche"      usr-tache-todo)
+    ("n" "action suivante"     usr-tache-suivante)
+    ("r" "rendez-vous"         usr-rendez-vous)]
+   ["Dates"
+    ("k" "calendrier"          calendar)
+    ("l" "insérer un lien"     org-store-link)]])
+
+(transient-define-prefix usr-menu-notes-explorer ()
+  "Statistiques et entretien de la base Denote."
+  [["Statistiques"
+    ("c" "compter les notes"       denote-explore-count-notes)
+    ("C" "compter les mots-clés"   denote-explore-count-keywords)
+    ("b" "histogramme des mots-clés" denote-explore-barchart-keywords)
+    ("t" "histogramme des types"   denote-explore-barchart-filetypes)]
+   ["Marche aléatoire"
+    ("r" "note au hasard"          denote-explore-random-note)
+    ("l" "lien au hasard"          denote-explore-random-link)
+    ("k" "mot-clé au hasard"       denote-explore-random-keyword)
+    ("x" "expression au hasard"    denote-explore-random-regex)]
+   ["Entretien"
+    ("d" "notes en double"         denote-explore-identify-duplicate-notes)
+    ("z" "notes sans mot-clé"      denote-explore-zero-keywords)
+    ("s" "mots-clés uniques"       denote-explore-single-keywords)
+    ("o" "trier les mots-clés"     denote-explore-sort-keywords)
+    ("w" "renommer un mot-clé"     denote-explore-rename-keyword)]
+   ["Graphe"
+    ("g" "générer le réseau"       denote-explore-network)
+    ("G" "régénérer le réseau"     denote-explore-network-regenerate)
+    ("D" "histogramme des degrés"  denote-explore-barchart-degree)]])
+
+(transient-define-prefix usr-menu-notes-biblio ()
+  "Bibliographie et notes de lecture."
+  [["Références"
+    ("b" "chercher en ligne…"   ews-bibtex-biblio-lookup)
+    ("o" "ouvrir une référence" citar-open)
+    ("R" "réenregistrer la base" ews-bibtex-register)]
+   ["Notes de lecture"
+    ("c" "créer une note"       citar-create-note)
+    ("n" "ouvrir la note"       citar-denote-open-note)
+    ("x" "références sans note" citar-denote-nocite)]
+   ["Dans le texte (Org)"
+    ("k" "ajouter une clé"      citar-denote-add-citekey)
+    ("K" "retirer une clé"      citar-denote-remove-citekey)
+    ("d" "agir sur la citation" citar-denote-dwim)
+    ("e" "ouvrir l'entrée BibTeX" citar-denote-open-reference-entry)]])
+
+(transient-define-prefix usr-menu-notes ()
+  "Notes Denote et documentation."
+  [["Créer"
+    ("n" "nouvelle note"        denote)
+    ("d" "note datée"           denote-date)
+    ("i" "lier ou créer"        denote-link-or-create)
+    ("h" "lien vers un titre"   denote-org-link-to-heading)]
+   ["Parcourir"
+    ("f" "chercher une note…"   consult-notes)
+    ("g" "chercher dans les notes…" consult-notes-search-in-all-notes)
+    ("l" "liens sortants"       denote-find-link)
+    ("b" "rétroliens"           denote-find-backlink)]
+   ["Entretien"
+    ("r" "renommer"             denote-rename-file)
+    ("R" "renommer (en-tête)"   denote-rename-file-using-front-matter)
+    ("k" "modifier les mots-clés" denote-rename-file-keywords)]
+   ["Approfondir"
+    ("x" "explorer la base…"    usr-menu-notes-explorer)
+    ("B" "bibliographie…"       usr-menu-notes-biblio)]])
+
+(transient-define-prefix usr-menu-ecriture ()
+  "Écriture, relecture et export."
+  [["Langue"
+    ("o" "corriger le mot"      flyspell-auto-correct-previous-word)
+    ("O" "vérifier tout le texte" ispell)
+    ("m" "définition d'un mot…" dictionary-lookup-definition)
+    ("l" "lisibilité du texte"  writegood-reading-ease)]
+   ["Org"
+    ("n" "tiroir de notes"      ews-org-insert-notes-drawer)
+    ("c" "compter les mots"     ews-org-count-words)
+    ("i" "insérer une capture d'écran" ews-org-insert-screenshot)
+    ("w" "insérer un lien web…" org-web-tools-insert-link-for-url)
+    ("h" "aller à un titre…"    consult-org-heading)
+    ("g" "chercher dans les fichiers…" consult-grep)]
+   ["Confort"
+    ("s" "sans distraction"     darkroom-mode)
+    ("t" "thème clair / sombre" modus-themes-toggle)
+    ("T" "choisir un thème…"    modus-themes-select)
+    ("u" "annuler visuellement" vundo)]
+   ["Exporter"
+    ("p" "en PDF"               org-latex-export-to-pdf)
+    ("P" "en PDF vers un dossier…" usr-export-pdf-vers)
+    ("e" "en EPUB"              org-epub-export-to-epub)]])
+
+(transient-define-prefix usr-menu-courriel ()
+  "Courriel (notmuch)."
+  [["Lire"
+    ("n" "nouveaux (TECI)"      usr-courriel-nouveaux)
+    ("i" "boîte de réception"   usr-courriel-boite)
+    ("m" "accueil notmuch"      notmuch)
+    ("f" "chercher…"            notmuch-search)]
+   ["Écrire"
+    ("c" "nouveau message"      notmuch-mua-new-mail)
+    ("p" "contacts"             ebdb)]
+   ["Entretien"
+    ("s" "synchroniser"         usr-courriel-synchroniser)]])
+
+(transient-define-prefix usr-menu-ia ()
+  "Assistant IA (gptel)."
+  [["Dialogue"
+    ("q" "question…"            usr-ia-question)
+    ("t" "fil de discussion…"   usr-ia-dialogue)
+    ("T" "réinitialiser le fil" usr-ia-dialogue-reinitialiser)
+    ("b" "voir la réponse"      usr-ia-voir-reponse)
+    ("y" "copier la réponse"    usr-ia-copier-reponse)]
+   ["Sur le texte"
+    ("c" "corriger la région"   usr-ia-corriger)
+    ("e" "rédiger un courriel"  usr-ia-courriel)
+    ("r" "réécrire"             gptel-rewrite)
+    ("D" "diagnostiquer une erreur" usr-ia-diagnostiquer)]
+   ["Contexte"
+    ("a" "ajouter le tampon"    gptel-add)
+    ("F" "ajouter un fichier"   gptel-add-file)
+    ("x" "vider le contexte"    usr-ia-contexte-vider)]
+   ["Session Emacs"
+    ("g" "nouvelle session"     gptel)
+    ("RET" "envoyer"            gptel-send)
+    ("SPC" "menu gptel"         gptel-menu)]
+   ["Réglages"
+    ("d" usr-ia-directive   :description usr--ia-desc-directive)
+    ("m" usr-ia-modele      :description usr--ia-desc-modele)
+    ("M" "modèle par défaut" usr-ia-modele-defaut)
+    ("o" usr-ia-outils      :description usr--ia-desc-outils)
+    ("w" usr-ia-recherche-web :description usr--ia-desc-web)
+    ("?" usr-ia-etat        :description usr--ia-desc-fil)]]
+  (interactive)
+  (require 'gptel nil t)
+  (transient-setup 'usr-menu-ia))
+
+(transient-define-prefix usr-menu-comptabilite ()
+  "Comptabilité et facturation de l'association."
+  [["Journal"
+    ("o" "ouvrir le journal"    usr-compta-ouvrir)
+    ("a" "ajouter une écriture" ledger-add-transaction)
+    ("v" "vérifier le journal"  usr-compta-verifier)
+    ("r" "rapports…"            ledger-report)
+    ("e" "exporter en CSV"      usr-compta-exporter)]
+   ["Documents"
+    ("d" "nouveau devis"        usr-facturation-devis)
+    ("f" "nouvelle facture"     usr-facturation-facture)
+    ("u" "nouveau reçu"         usr-facturation-recu)]])
+
+(transient-define-prefix usr-menu-systeme ()
+  "Énergie, sécurité, services et matériel."
+  [["Énergie"
+    ("q" "éteindre"             usr-eteindre)
+    ("r" "redémarrer"           usr-redemarrer)
+    ("z" "mettre en veille"     usr-veille)
+    ("v" "verrouiller l'écran"  usr-ecran-verrouiller)]
+   ["Sécurité"
+    ("g" "déverrouiller GPG"    usr-gpg-deverrouiller)
+    ("G" "verrouiller GPG"      usr-gpg-verrouiller)]
+   ["Réseau & données"
+    ("m" "monter Club1"         usr-club1-monter)
+    ("M" "démonter Club1"       usr-club1-demonter)
+    ("s" "démarrer Syncthing"   usr-syncthing-demarrer)
+    ("S" "arrêter Syncthing"    usr-syncthing-arreter)]
+   ["Matériel"
+    ("+" "volume +"             usr-volume-monter    :transient t)
+    ("-" "volume −"             usr-volume-baisser   :transient t)
+    ("0" "couper le son"        usr-volume-couper    :transient t)
+    (">" "luminosité +"         usr-luminosite-monter  :transient t)
+    ("<" "luminosité −"         usr-luminosite-baisser :transient t)]
+   ["Configuration"
+    ("u" "mettre à jour (guix pull)" usr-guix-mettre-a-jour)
+    ("c" "recharger la configuration" usr-configuration-recharger)
+    ("e" "éditer init.el"       usr-configuration-editer)
+    ("t" "vider la corbeille"   usr-corbeille-vider)
+    ("p" "personnaliser une variable…" customize-variable)]])
+
+(transient-define-prefix usr-menu-aide ()
+  "Découvrir les commandes et les touches."
+  [["Découvrir"
+    ("k" "décrire une touche…"  helpful-key)
+    ("m" "touches du mode"      describe-mode)
+    ("a" "chercher une commande…" apropos-command)]
+   ["Décrire"
+    ("f" "une fonction…"        helpful-function)
+    ("x" "une commande…"        helpful-command)
+    ("v" "une variable…"        helpful-variable)]
+   ["Cette configuration"
+    ("c" "la carte des raccourcis" usr-carte-raccourcis)]])
+
+(transient-define-prefix usr-menu ()
+  "Menu principal de la session."
+  [:description "s-SPC — menu de la session"
+   ["Rapide"
+    ("SPC" "tampon…"            consult-buffer)
+    ("t"   "trouver un fichier…" find-file)
+    ("x"   "commande (M-x)"     execute-extended-command)
+    ("k"   "fermer le tampon"   kill-current-buffer)]
+   ["Travail"
+    ("o" "Organisation"         usr-menu-organisation)
+    ("n" "Notes & documents"    usr-menu-notes)
+    ("e" "Écriture"             usr-menu-ecriture)
+    ("c" "Courriel"             usr-menu-courriel)
+    ("i" "Assistant IA"         usr-menu-ia)
+    ("$" "Comptabilité"         usr-menu-comptabilite)]
+   ["Machine"
+    ("a" "Applications"         usr-menu-applications)
+    ("f" "Fenêtres"             usr-menu-fenetres)
+    ("s" "Système"              usr-menu-systeme)
+    ("?" "Aide"                 usr-menu-aide)]])
+
+;;;; --- Touches directes -----------------------------------------------------
+
+(dolist (paire
+         '(;; La porte d'entrée unique
+           ("s-SPC"     . usr-menu-ouvrir)
+           ;; Gestes réflexes
+           ("s-<left>"  . windmove-left)
+           ("s-<right>" . windmove-right)
+           ("s-<up>"    . windmove-up)
+           ("s-<down>"  . windmove-down)
+           ("s-<tab>"   . exwm-layout-toggle-fullscreen)
+           ;; Touches dédiées du clavier
+           ("<XF86AudioRaiseVolume>"  . usr-volume-monter)
+           ("<XF86AudioLowerVolume>"  . usr-volume-baisser)
+           ("<XF86AudioMute>"         . usr-volume-couper)
+           ("<XF86AudioPlay>"         . emms-pause)
+           ("<XF86AudioNext>"         . emms-next)
+           ("<XF86AudioPrev>"         . emms-previous)
+           ("<XF86MonBrightnessUp>"   . usr-luminosite-monter)
+           ("<XF86MonBrightnessDown>" . usr-luminosite-baisser)))
+  (exwm-input-set-key (kbd (car paire)) (cdr paire)))
+
+;; Porte de secours quand la touche Super n'est pas disponible : Emacs en
+;; terminal, emacsclient hors session X, machine distante.
+(keymap-global-set "C-c SPC" #'usr-menu-ouvrir)
+
+;;;; --- Carte des raccourcis -------------------------------------------------
+
+(defvar usr-carte-menus
+  '((usr-menu                 . "Menu principal — s-SPC")
+    (usr-menu-organisation    . "Organisation — s-SPC o")
+    (usr-menu-notes           . "Notes & documents — s-SPC n")
+    (usr-menu-notes-explorer  . "Explorer la base — s-SPC n x")
+    (usr-menu-notes-biblio    . "Bibliographie — s-SPC n B")
+    (usr-menu-ecriture        . "Écriture — s-SPC e")
+    (usr-menu-courriel        . "Courriel — s-SPC c")
+    (usr-menu-ia              . "Assistant IA — s-SPC i")
+    (usr-menu-comptabilite    . "Comptabilité — s-SPC $")
+    (usr-menu-applications    . "Applications — s-SPC a")
+    (usr-menu-fenetres        . "Fenêtres — s-SPC f")
+    (usr-menu-systeme         . "Système — s-SPC s")
+    (usr-menu-aide            . "Aide — s-SPC ?"))
+  "Menus à recenser dans `usr-carte-raccourcis', et leur titre.")
+
+(defun usr--carte-texte (valeur)
+  "Ramène VALEUR — chaîne ou fonction — à une chaîne affichable."
+  (cond ((stringp valeur) valeur)
+        ((functionp valeur) (condition-case nil
+                                (format "%s" (funcall valeur))
+                              (error "…")))
+        (t nil)))
+
+(defun usr--carte-noeud (noeud lignes)
+  "Ajoute la description de NOEUD à LIGNES (accumulateur inversé).
+Parcourt la structure `transient--layout', faite de vecteurs
+[NIVEAU CLASSE PROPRIÉTÉS ENFANTS] pour les groupes et
+[NIVEAU CLASSE PROPRIÉTÉS] pour les commandes."
+  (cond
+   ((and (listp noeud) (not (null noeud)))
+    (dolist (e noeud) (setq lignes (usr--carte-noeud e lignes)))
+    lignes)
+   ((not (vectorp noeud)) lignes)
+   ((>= (length noeud) 4)                              ; groupe
+    (let ((titre (usr--carte-texte (plist-get (aref noeud 2) :description))))
+      (when titre (push (format "  /%s/" titre) lignes))
+      (usr--carte-noeud (aref noeud 3) lignes)))
+   (t                                                  ; commande
+    (let* ((p (aref noeud 2))
+           (touche (plist-get p :key))
+           (desc (usr--carte-texte (plist-get p :description)))
+           (cmd (plist-get p :command)))
+      (if touche
+          (push (format "  | %-6s | %-38s | %s |"
+                        touche (or desc "") (or cmd ""))
+                lignes)
+        lignes)))))
+
+(defun usr-carte-raccourcis ()
+  "Produit un tampon Org listant l'intégralité de l'arbre des raccourcis.
+La carte est construite à partir des menus eux-mêmes : elle ne peut pas
+diverger de ce que les touches font réellement."
+  (interactive)
+  (let ((tampon (get-buffer-create "*carte des raccourcis*")))
+    (with-current-buffer tampon
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (org-mode)
+        (insert "#+TITLE: Carte des raccourcis\n"
+                "#+OPTIONS: toc:nil\n\n"
+                "Une seule porte d'entrée : =s-SPC= (=C-c SPC= en secours).\n\n"
+                "* Touches directes\n\n"
+                "  | s-SPC                | le menu                          |\n"
+                "  | s-<flèches>          | déplacement entre fenêtres       |\n"
+                "  | s-<tab>              | plein écran                      |\n"
+                "  | XF86Audio*           | volume, lecture                  |\n"
+                "  | XF86MonBrightness*   | luminosité                       |\n"
+                "  | C-;                  | corriger le mot précédent        |\n"
+                "  | C-x b / C-x m        | tampon / nouveau courriel        |\n"
+                "  | C-M-/                | annuler visuellement             |\n\n")
+        (dolist (entree usr-carte-menus)
+          (let ((prefixe (car entree)))
+            (insert (format "* %s\n\n" (cdr entree)))
+            (let ((lignes (nreverse
+                           (usr--carte-noeud
+                            (get prefixe 'transient--layout) nil))))
+              (if lignes
+                  (insert (mapconcat #'identity lignes "\n") "\n\n")
+                (insert "  (menu vide ou non chargé)\n\n")))))
+        (goto-char (point-min))))
+    (pop-to-buffer tampon)))
