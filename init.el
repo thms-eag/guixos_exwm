@@ -963,44 +963,83 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
            ;; Cherche '00000000' dans la colonne Destination (indique la passerelle par défaut)
            (not (null (re-search-forward "^[a-z0-9]+\\s-+00000000\\s-+" nil t)))))))
 
+(defun lateci--monte-p (point-de-montage)
+  "Vrai si POINT-DE-MONTAGE figure dans /proc/mounts.
+Lecture en Lisp pur, sans lancer de processus — même approche que
+`lateci--network-online-p'."
+  (let ((chemin (directory-file-name (expand-file-name point-de-montage))))
+    (and (file-exists-p "/proc/mounts")
+         (with-temp-buffer
+           (insert-file-contents "/proc/mounts")
+           (goto-char (point-min))
+           ;; Chaque ligne : périphérique, point de montage, type, options…
+           ;; Le noyau échappe les espaces du chemin en \040.
+           (and (search-forward
+                 (concat " " (string-replace " " "\\040" chemin) " ")
+                 nil t)
+                t)))))
+
+(defun lateci--sonder (nom commande rappel)
+  "Exécute COMMANDE en arrière-plan sous le nom NOM.
+RAPPEL reçoit le code de sortie et la sortie complète, une fois le
+processus réellement terminé.
+
+La sortie transite par un tampon plutôt que par un `:filter' : un filtre
+est appelé par fragments, et une réponse coupée au mauvais endroit
+passerait à côté du motif recherché."
+  (let ((tampon (generate-new-buffer (format " *%s*" nom))))
+    (make-process
+     :name nom
+     :buffer tampon
+     :noquery t
+     :command commande
+     :sentinel
+     (lambda (proc _event)
+       ;; Garde explicite : le sentinelle peut être appelé sur d'autres
+       ;; transitions, où `process-exit-status' ne veut rien dire.
+       (when (memq (process-status proc) '(exit signal))
+         (let ((code (process-exit-status proc))
+               (sortie (with-current-buffer (process-buffer proc)
+                         (buffer-string))))
+           (kill-buffer (process-buffer proc))
+           (funcall rappel code sortie)))))))
+
 (defun lateci--verifier-systeme ()
-  "Moteur de vérification principal 100% asynchrone."
-  ;; 1. GPG Async
-  (setq lateci--gpg-unlocked nil)
-  (make-process
-   :name "gpg-check" :buffer nil
-   :command '("gpg-connect-agent" "keyinfo --list" "/bye")
-   :filter (lambda (_proc output)
-             (when (string-match-p "KEYINFO .*\\b1\\b" output)
-               (setq lateci--gpg-unlocked t)))
-   :sentinel (lambda (_proc _event) (lateci--actualiser-affichage)))
+  "Met à jour les indicateurs système de la modeline.
 
-  ;; 2. SSH Async
-  (make-process
-   :name "ssh-check" :buffer nil
-   :command (list "mountpoint" "-q" (expand-file-name "~/Club1"))
-   :sentinel (lambda (proc _event)
-               (setq lateci--ssh-mounted (= (process-exit-status proc) 0))
-               (lateci--actualiser-affichage)))
-  
-  ;; 3. Syncthing Async
-  (make-process
-   :name "syncthing-check" :buffer nil
-   :command '("pgrep" "-x" "syncthing")
-   :sentinel (lambda (proc _event)
-               (setq lateci--syncthing-online (= (process-exit-status proc) 0))
-               (lateci--actualiser-affichage)))
-
-  ;; 4. Réseau Async
+Deux processus au plus par passage, contre quatre auparavant : le réseau
+et le montage distant se lisent directement dans /proc, et un unique
+`pgrep' couvre les deux démons."
+  ;; 1 et 2. Réseau et montage distant : Lisp pur, aucun processus.
   (setq lateci--reseau-online (lateci--network-online-p))
-  
-  ;; 5. Hydroxide Async
-  (make-process
-   :name "hydroxide-check" :buffer nil
-   :command '("pgrep" "-x" "hydroxide")
-   :sentinel (lambda (proc _event)
-               (setq lateci--hydroxide-online (= (process-exit-status proc) 0))
-               (lateci--actualiser-affichage))))
+  (setq lateci--ssh-mounted   (lateci--monte-p "~/Club1"))
+
+  ;; 3. État de la clé GPG.
+  (lateci--sonder
+   "gpg-check" '("gpg-connect-agent" "keyinfo --list" "/bye")
+   (lambda (_code sortie)
+     (setq lateci--gpg-unlocked
+           (and (string-match-p "KEYINFO .*\\b1\\b" sortie) t))
+     (lateci--actualiser-affichage)))
+
+  ;; 4. Les deux démons en un seul appel.
+  (lateci--sonder
+   "daemons-check" '("pgrep" "-x" "-l" "syncthing|hydroxide")
+   (lambda (_code sortie)
+     (setq lateci--syncthing-online (and (string-match-p "syncthing" sortie) t)
+           lateci--hydroxide-online (and (string-match-p "hydroxide" sortie) t))
+     (lateci--actualiser-affichage)))
+
+  ;; Affichage immédiat des indicateurs synchrones, sans attendre les
+  ;; deux processus.
+  (lateci--actualiser-affichage))
+
+(defvar lateci-sondage-intervalle 60
+  "Intervalle, en secondes, entre deux sondages de l'état système.
+
+Les commandes qui changent cet état (montage, Syncthing, GPG) forcent
+elles-mêmes un rafraîchissement : cet intervalle ne conditionne que la
+détection des changements venus de l'extérieur.")
 
 (defvar lateci--verifier-systeme-timer nil
   "Minuteur de sondage système, conservé pour pouvoir être annulé.")
@@ -1014,7 +1053,7 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
 
 (lateci--verifier-systeme)
 (setq lateci--verifier-systeme-timer
-      (run-with-timer 0 10 #'lateci--verifier-systeme))
+      (run-with-timer 0 lateci-sondage-intervalle #'lateci--verifier-systeme))
 
 ;;;; EXWM
 (require 'exwm)
@@ -2233,13 +2272,17 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
   "Demande à Shepherd de démarrer le service SSHFS."
   (interactive)
   (start-process "shepherd-sshfs-on" nil "herd" "start" "sshfs-club1")
-  (message "Montage de Club1 via Shepherd..."))
+  (message "Montage de Club1 via Shepherd...")
+  ;; Le montage passe par le réseau : on laisse le temps à sshfs d'aboutir
+  ;; avant de rafraîchir l'indicateur « srv ».
+  (run-at-time "3 sec" nil #'lateci--verifier-systeme))
 
 (defun umount-club1 ()
   "Demande à Shepherd d'arrêter le service SSHFS."
   (interactive)
   (start-process "shepherd-sshfs-off" nil "herd" "stop" "sshfs-club1")
-  (message "Démontage de Club1 via Shepherd..."))
+  (message "Démontage de Club1 via Shepherd...")
+  (run-at-time "2 sec" nil #'lateci--verifier-systeme))
 
 (global-set-key (kbd "C-c <f7>") #'mount-club1)
 (global-set-key (kbd "C-c S-<f7>") #'umount-club1)
@@ -2249,8 +2292,15 @@ Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
   :defer t
   :custom
   (syncthing-host "127.0.0.1:8384")
-  (syncthing-default-server-token
-    (string-trim (shell-command-to-string "pass show api/syncthing"))))
+  :config
+  ;; Le jeton était lu dans un `:custom'. Or `:custom' se traduit par un
+  ;; `customize-set-variable' placé avant `:init' dans le corps engendré :
+  ;; il s'exécute au démarrage, malgré le `:defer t'. Chaque lancement
+  ;; d'Emacs — donc de la session X — appelait ainsi `pass show', puis gpg,
+  ;; et si la clé n'était pas déverrouillée, pinentry bloquait le démarrage.
+  ;; En `:config', la lecture n'a lieu qu'au premier `M-x syncthing'.
+  (setq syncthing-default-server-token
+        (string-trim (shell-command-to-string "pass show api/syncthing"))))
 
 (defun st-on ()
   "Démarre Syncthing via le gestionnaire de services Shepherd."
