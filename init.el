@@ -879,24 +879,43 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
 ;;;;; Témoins colorés : couleur limitée à la fenêtre sélectionnée
 ;; La modeline inactive est masquée par `usr-appliquer-faces' (texte et fond à la
 ;; couleur du fond d'Emacs). Mais Emacs fusionne la face d'une chaîne de modeline
-;; PAR-DESSUS `mode-line-inactive' : tout segment posant un `:foreground' explicite
-;; — le « ● REC » de la note vocale, les faces `battery-load-low' et
-;; `battery-load-critical' de battery.el — écrase ce masquage et reste lisible sur
-;; les fenêtres non sélectionnées. `mode-line-window-selected-p' (Emacs 28+) permet
-;; de ne laisser les couleurs que sur la fenêtre courante.
+;; PAR-DESSUS `mode-line-inactive' : un segment posant un `:foreground' explicite
+;; écrase ce masquage et reste lisible sur les fenêtres non sélectionnées. Seuls
+;; deux segments sont dans ce cas : le « ● REC » de la note vocale et la batterie
+;; basse (faces `battery-load-low'/`battery-load-critical', ajoutées à la chaîne
+;; par `battery-update' — aucune variable ne permet de les désactiver).
+;;
+;; On masque chaque segment à la source, au moment du rendu. Surtout PAS en
+;; re-rendant `global-mode-string' via `format-mode-line' : la chaîne renvoyée
+;; porte `face t', valeur qui n'est pas une face, et la réinjecter corrompt
+;; l'affichage.
 
-(defun usr--modeline-divers ()
-  "Rend `global-mode-string', sans couleurs hors fenêtre sélectionnée.
-Remplace le rendu par défaut de `mode-line-misc-info'."
-  (let ((rendu (format-mode-line '("" global-mode-string))))
+(defun usr--modeline-masquer (chaine)
+  "Renvoie CHAINE telle quelle sur la fenêtre sélectionnée, masquée ailleurs.
+Hors fenêtre sélectionnée, `mode-line-inactive' est reposée sur toute la chaîne :
+`usr-appliquer-faces' la peignant à la couleur du fond, le segment disparaît comme
+le reste de la ligne.  `propertize' renvoie une copie — la chaîne source, partagée
+avec `battery.el', n'est pas altérée — et n'écrase que la propriété `face' :
+`help-echo' et les cartes de souris sont conservés."
+  (let ((chaine (or chaine "")))
     (if (mode-line-window-selected-p)
-        rendu
-      ;; `propertize' renvoie une copie : les chaînes sources ne sont pas altérées.
-      ;; Seule la propriété `face' est écrasée — `help-echo' et les cartes de
-      ;; souris des segments sont conservés.
-      (propertize rendu 'face 'mode-line-inactive))))
+        chaine
+      (propertize chaine 'face 'mode-line-inactive))))
 
-(setq-default mode-line-misc-info '((:eval (usr--modeline-divers))))
+;; Batterie : `display-battery-mode' (plus haut) a posé le symbole
+;; `battery-mode-line-string' dans `global-mode-string' ; on lui substitue notre
+;; propre élément. `risky-local-variable' est requis pour que le `:eval' soit honoré.
+(defvar usr--batterie-temoin
+  '(:eval (usr--modeline-masquer battery-mode-line-string))
+  "Élément de `global-mode-string' rendant la batterie.")
+(put 'usr--batterie-temoin 'risky-local-variable t)
+
+(setq global-mode-string
+      (mapcar (lambda (element)
+                (if (eq element 'battery-mode-line-string)
+                    'usr--batterie-temoin
+                  element))
+              global-mode-string))
 
 ;;;;; Modeline unifiée (Réseau, SSH, Hydroxide, GPG, Syncthing) 
 (defvar usr--reseau-online nil)
@@ -2494,7 +2513,16 @@ l'écriture au groupe « input ».")
 (defvar usr--vocale-lien-courant nil
   "Lien Org du dernier audio déposé, lu par le modèle de capture « V ».")
 
-(defvar usr--vocale-temoin "")
+(defvar usr--vocale-temoin-chaine ""
+  "Chaîne propertisée du témoin, alimentée par `usr--vocale-temoin-poser'.")
+
+;; Rendu à chaque redessin : `usr--modeline-masquer' laisse la couleur sur la
+;; fenêtre sélectionnée et la retire ailleurs. `risky-local-variable' est requis
+;; pour que le `:eval' soit honoré.
+(defvar usr--vocale-temoin
+  '(:eval (usr--modeline-masquer usr--vocale-temoin-chaine))
+  "Élément de `global-mode-string' rendant le témoin de note vocale.")
+(put 'usr--vocale-temoin 'risky-local-variable t)
 
 (or global-mode-string (setq global-mode-string '("")))
 (unless (memq 'usr--vocale-temoin global-mode-string)
@@ -2502,7 +2530,7 @@ l'écriture au groupe « input ».")
 
 (defun usr--vocale-temoin-poser (texte &optional face)
   "Affiche TEXTE dans la modeline, ou l'efface lorsque TEXTE vaut nil."
-  (setq usr--vocale-temoin
+  (setq usr--vocale-temoin-chaine
         (if texte
             (propertize (format " %s " texte) 'face (or face 'mode-line-emphasis))
           ""))
