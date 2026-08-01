@@ -2832,6 +2832,21 @@ monté un partage, sans attendre le prochain sondage périodique."
 
 ;;;; --- Touches directes -----------------------------------------------------
 
+;; VerrMaj devient une touche Super supplémentaire : toutes les liaisons « s- »
+;; ci-dessous répondent indifféremment à VerrMaj ou à la touche Super physique,
+;; qui garde son rôle. VerrMaj perd son verrouillage des majuscules ; Shift est
+;; inchangé, la disposition « fr » aussi.
+;;
+;; Posé ici, avant les liaisons : les prises de touches d'EXWM se font au serveur
+;; X sur des keycodes, et doivent l'être une fois la nouvelle correspondance en
+;; place, faute de quoi VerrMaj partirait au client X11 au lieu de remonter à
+;; Emacs.
+(when (display-graphic-p)
+  (condition-case err
+      (call-process "setxkbmap" nil nil nil "-option" "caps:super")
+    (error (message "setxkbmap absent : VerrMaj non convertie en Super (%s)"
+                    (error-message-string err)))))
+
 (defun usr--lier-touche (touche commande)
   "Lie TOUCHE à COMMANDE pour EXWM sans interrompre le chargement en cas d'échec.
 Une touche absente du clavier est simplement ignorée."
