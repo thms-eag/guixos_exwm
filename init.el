@@ -878,44 +878,43 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
 
 ;;;;; Témoins colorés : couleur limitée à la fenêtre sélectionnée
 ;; La modeline inactive est masquée par `usr-appliquer-faces' (texte et fond à la
-;; couleur du fond d'Emacs). Mais Emacs fusionne la face d'une chaîne de modeline
+;; couleur du fond d'Emacs), mais Emacs fusionne la face d'une chaîne de modeline
 ;; PAR-DESSUS `mode-line-inactive' : un segment posant un `:foreground' explicite
-;; écrase ce masquage et reste lisible sur les fenêtres non sélectionnées. Seuls
-;; deux segments sont dans ce cas : le « ● REC » de la note vocale et la batterie
-;; basse (faces `battery-load-low'/`battery-load-critical', ajoutées à la chaîne
-;; par `battery-update' — aucune variable ne permet de les désactiver).
-;;
-;; On masque chaque segment à la source, au moment du rendu. Surtout PAS en
-;; re-rendant `global-mode-string' via `format-mode-line' : la chaîne renvoyée
-;; porte `face t', valeur qui n'est pas une face, et la réinjecter corrompt
-;; l'affichage.
+;; écrase ce masquage et reste lisible ailleurs. Deux segments sont dans ce cas :
+;; le « ● REC » de la note vocale et la batterie basse (faces `battery-load-low'
+;; et `battery-load-critical', ajoutées à la chaîne par `battery-update').
 
-(defun usr--modeline-masquer (chaine)
-  "Renvoie CHAINE telle quelle sur la fenêtre sélectionnée, masquée ailleurs.
-Hors fenêtre sélectionnée, `mode-line-inactive' est reposée sur toute la chaîne :
-`usr-appliquer-faces' la peignant à la couleur du fond, le segment disparaît comme
-le reste de la ligne.  `propertize' renvoie une copie — la chaîne source, partagée
-avec `battery.el', n'est pas altérée — et n'écrase que la propriété `face' :
-`help-echo' et les cartes de souris sont conservés."
-  (let ((chaine (or chaine "")))
-    (if (mode-line-window-selected-p)
-        chaine
-      (propertize chaine 'face 'mode-line-inactive))))
+(defun usr--modeline-masquer (symbole)
+  "Construction de modeline affichant SYMBOLE, masquée hors fenêtre sélectionnée.
+Passer par le symbole et non par sa chaîne : une chaîne renvoyée par `:eval' est
+traitée comme un format et ses %-constructions sont interprétées — « [100%] » y
+perdait « %] ».  SYMBOLE doit porter `risky-local-variable'."
+  (if (mode-line-window-selected-p)
+      symbole
+    (list :propertize symbole 'face 'mode-line-inactive)))
 
-;; Batterie : `display-battery-mode' (plus haut) a posé le symbole
-;; `battery-mode-line-string' dans `global-mode-string' ; on lui substitue notre
-;; propre élément. `risky-local-variable' est requis pour que le `:eval' soit honoré.
 (defvar usr--batterie-temoin
-  '(:eval (usr--modeline-masquer battery-mode-line-string))
+  '(:eval (usr--modeline-masquer 'battery-mode-line-string))
   "Élément de `global-mode-string' rendant la batterie.")
 (put 'usr--batterie-temoin 'risky-local-variable t)
 
-(setq global-mode-string
-      (mapcar (lambda (element)
-                (if (eq element 'battery-mode-line-string)
-                    'usr--batterie-temoin
-                  element))
-              global-mode-string))
+(defun usr--batterie-installer (&rest _)
+  "Substitue `usr--batterie-temoin' à `battery-mode-line-string'.
+Rejoué après chaque bascule : `display-battery-mode' réinsère son propre symbole
+par `add-to-list', ce qui affichait la batterie deux fois.  `delete-dups' garde la
+première occurrence, donc la position d'origine du segment.  Mode désactivé,
+`battery-mode-line-string' vaut \"\" : notre élément n'affiche alors rien."
+  (setq global-mode-string
+        (delete-dups
+         (mapcar (lambda (element)
+                   (if (eq element 'battery-mode-line-string)
+                       'usr--batterie-temoin
+                     element))
+                 global-mode-string))))
+
+(advice-add 'display-battery-mode :after #'usr--batterie-installer)
+;; Le mode a été activé plus haut, avant la pose du conseil.
+(usr--batterie-installer)
 
 ;;;;; Modeline unifiée (Réseau, SSH, Hydroxide, GPG, Syncthing) 
 (defvar usr--reseau-online nil)
@@ -2515,12 +2514,13 @@ l'écriture au groupe « input ».")
 
 (defvar usr--vocale-temoin-chaine ""
   "Chaîne propertisée du témoin, alimentée par `usr--vocale-temoin-poser'.")
+(put 'usr--vocale-temoin-chaine 'risky-local-variable t)
 
 ;; Rendu à chaque redessin : `usr--modeline-masquer' laisse la couleur sur la
 ;; fenêtre sélectionnée et la retire ailleurs. `risky-local-variable' est requis
 ;; pour que le `:eval' soit honoré.
 (defvar usr--vocale-temoin
-  '(:eval (usr--modeline-masquer usr--vocale-temoin-chaine))
+  '(:eval (usr--modeline-masquer 'usr--vocale-temoin-chaine))
   "Élément de `global-mode-string' rendant le témoin de note vocale.")
 (put 'usr--vocale-temoin 'risky-local-variable t)
 
