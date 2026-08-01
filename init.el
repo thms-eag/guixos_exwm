@@ -864,8 +864,7 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
   :config
   ;; Format demandé : [mar. 10 | 12:21]
   (setq display-time-format "[%a%d | %H:%M]")
-  (setq display-time-default-load-average nil)
-  (display-time-mode 1))
+  (setq display-time-default-load-average nil))
 
 (use-package battery
   :ensure nil
@@ -875,6 +874,38 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
 
 ;; Position compacte avec pied-de-mouche
 (setq-default mode-line-position '("%p¶%l"))
+
+(defun usr--modeline-masquer (symbole)
+  "Construction de modeline affichant SYMBOLE, masquée hors fenêtre sélectionnée.
+Passer par le symbole et non par sa chaîne : une chaîne renvoyée par `:eval' est
+traitée comme un format et ses %-constructions sont interprétées — « [100%] » y
+perdait « %] ».  SYMBOLE doit porter `risky-local-variable'."
+  (if (mode-line-window-selected-p)
+      symbole
+    (list :propertize symbole 'face 'mode-line-inactive)))
+
+(defvar usr--batterie-temoin
+  '(:eval (usr--modeline-masquer 'battery-mode-line-string))
+  "Élément de `global-mode-string' rendant la batterie.")
+(put 'usr--batterie-temoin 'risky-local-variable t)
+
+(defun usr--batterie-installer (&rest _)
+  "Substitue `usr--batterie-temoin' à `battery-mode-line-string'.
+Rejoué après chaque bascule : `display-battery-mode' réinsère son propre symbole
+par `add-to-list', ce qui affichait la batterie deux fois.  `delete-dups' garde la
+première occurrence, donc la position d'origine du segment.  Mode désactivé,
+`battery-mode-line-string' vaut \"\" : notre élément n'affiche alors rien."
+  (setq global-mode-string
+        (delete-dups
+         (mapcar (lambda (element)
+                   (if (eq element 'battery-mode-line-string)
+                       'usr--batterie-temoin
+                     element))
+                 global-mode-string))))
+
+(advice-add 'display-battery-mode :after #'usr--batterie-installer)
+;; Le mode a été activé plus haut, avant la pose du conseil.
+(usr--batterie-installer)
 
 ;;;;; Modeline unifiée (Réseau, SSH, Hydroxide, GPG, Syncthing) 
 (defvar usr--reseau-online nil)
@@ -1118,11 +1149,11 @@ délibérée, à lancer séparément."
 (use-package elfeed
   :bind
   (:map elfeed-search-mode-map
-   ("c" . teci-flux-capturer)
-   ("d" . teci-flux-telecharger-audio)
+   ("c" . usr-flux-capturer)
+   ("d" . usr-flux-telecharger-audio)
    :map elfeed-show-mode-map
-   ("c" . teci-flux-capturer)
-   ("d" . teci-flux-telecharger-audio))
+   ("c" . usr-flux-capturer)
+   ("d" . usr-flux-telecharger-audio))
    
   :custom
   (elfeed-search-face-alist '((unread . (font-lock-keyword-face bold))))
@@ -2472,7 +2503,17 @@ l'écriture au groupe « input ».")
 (defvar usr--vocale-lien-courant nil
   "Lien Org du dernier audio déposé, lu par le modèle de capture « V ».")
 
-(defvar usr--vocale-temoin "")
+;; (defvar usr--vocale-temoin "")
+(defvar usr--vocale-temoin-chaine ""
+  "Chaîne propertisée du témoin, alimentée par `usr--vocale-temoin-poser'.")
+
+;; Rendu à chaque redessin : `usr--modeline-masquer' laisse la couleur sur la
+;; fenêtre sélectionnée et la retire ailleurs. `risky-local-variable' est requis
+;; pour que le `:eval' soit honoré.
+(defvar usr--vocale-temoin
+  '(:eval (usr--modeline-masquer usr--vocale-temoin-chaine))
+  "Élément de `global-mode-string' rendant le témoin de note vocale.")
+(put 'usr--vocale-temoin 'risky-local-variable t)
 
 (or global-mode-string (setq global-mode-string '("")))
 (unless (memq 'usr--vocale-temoin global-mode-string)
@@ -2480,7 +2521,7 @@ l'écriture au groupe « input ».")
 
 (defun usr--vocale-temoin-poser (texte &optional face)
   "Affiche TEXTE dans la modeline, ou l'efface lorsque TEXTE vaut nil."
-  (setq usr--vocale-temoin
+  (setq usr--vocale-temoin-chaine
         (if texte
             (propertize (format " %s " texte) 'face (or face 'mode-line-emphasis))
           ""))
@@ -3731,8 +3772,8 @@ Une touche absente du clavier est simplement ignorée."
     ("s-<down>"   . windmove-down)
     ("s-<prior>"  . previous-buffer)
     ("s-<next>"   . next-buffer)
-    ("s-<return>"    . delete-other-windows)
-    ("s-<tab>" . split-window-right)
+    ("s-<return>" . delete-other-windows)
+    ("s-<backspace>" . split-window-right)
 
     ;; --- Touches dédiées du clavier ---
     ;; Son
