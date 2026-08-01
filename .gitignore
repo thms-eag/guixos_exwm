@@ -1,0 +1,11 @@
+# Valeurs propres à une machine et à son titulaire : coordonnées bancaires,
+# adresse postale, identifiants de partitions, accès distants.  Ces fichiers
+# ne sont jamais versionnés — voir *.exemple pour les modèles.
+/prive.scm
+/prive.el
+
+# Compteurs de numérotation (devis, factures, reçus)
+/*-counter.el
+
+# Sorties de compilation Emacs
+*.elc

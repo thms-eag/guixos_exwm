@@ -1,0 +1,41 @@
+;;; prive.el --- Données privées de la configuration Emacs  -*- lexical-binding: t; -*-
+;;
+;; Copier ce fichier vers ~/.config/lateci/prive.el, puis y porter les
+;; valeurs réelles :
+;;
+;;     mkdir -p ~/.config/lateci
+;;     cp prive.el.exemple ~/.config/lateci/prive.el
+;;     chmod 600 ~/.config/lateci/prive.el
+;;
+;; Pourquoi ~/.config plutôt qu'à côté de init.el, comme son homologue
+;; prive.scm l'est de config.scm : init.el est déployé dans ~/.emacs.d, qui
+;; peut être ré-effacé ou re-cloné.  Un fichier privé qui y vivrait
+;; disparaîtrait avec lui.
+;;
+;; Tant que ce fichier n'existe pas, init.el conserve ses valeurs de
+;; démonstration : la configuration démarre et reste utilisable, elle
+;; n'imprime simplement pas les bonnes coordonnées.
+;;
+;; N'y mettre aucune clé d'API : celles-ci sont déjà lues depuis « pass »
+;; (voir usr--cle-anthropic et consorts dans init.el).
+
+;;; Adresse postale du siège — une chaîne par ligne imprimée.
+(setq lateci-org-adresse '("1 rue de l'Exemple"
+                           "00000 VILLE"))
+
+;;; Identifiants administratifs.
+(setq lateci-org-siret "00000000000000")
+(setq lateci-org-ape   "00.00Z")
+
+;;; Coordonnées bancaires, imprimées en pied de devis et de facture.
+(setq lateci-banque-iban "FR76 0000 0000 0000 0000 0000 000")
+(setq lateci-banque-bic  "XXXXXXXX")
+
+;;; Téléphone repris dans la signature de courriel.
+(setq lateci-tel "+33 0 00 00 00 00")
+
+;;; Adresse personnelle, distincte de celle de l'association : elle sert à
+;;; construire les requêtes notmuch de la boîte de réception.
+(setq lateci-courriel-perso "personne@exemple.org")
+
+;;; prive.el ends here

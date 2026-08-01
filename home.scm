@@ -8,6 +8,27 @@
              (gnu packages)
              (guix gexp))
 
+;;; Même lecteur de valeurs privées que config.scm.  Les quinze lignes sont
+;;; volontairement recopiées : c'est l'amorçage, et le factoriser supposerait
+;;; de savoir charger un fichier tiers avant de savoir en trouver un.
+
+(define %prive
+  (let* ((ici (or (and=> (current-filename) dirname) "."))
+         (fichier (string-append ici "/prive.scm")))
+    (if (file-exists? fichier)
+        (call-with-input-file fichier read)
+        '())))
+
+(define (prive cle)
+  "Valeur privée CLE, ou erreur explicite si elle manque."
+  (or (assq-ref %prive cle)
+      (error (string-append
+              "valeur privée absente : " (symbol->string cle)
+              " — copier prive.scm.exemple en prive.scm"))))
+
+(define %utilisateur "thomas_rm")
+(define %home (string-append "/home/" %utilisateur))
+
 (home-environment
  (packages
   (map specification->package
@@ -73,7 +94,10 @@
             (home-gpg-agent-configuration
              (default-cache-ttl 43200)
              (max-cache-ttl 43200)
-             (extra-content "pinentry-program /home/thomas_rm/.guix-home/profile/bin/pinentry-emacs\nallow-loopback-pinentry\nallow-emacs-pinentry")))
+             (extra-content
+              (string-append "pinentry-program " %home
+                             "/.guix-home/profile/bin/pinentry-emacs\n"
+                             "allow-loopback-pinentry\nallow-emacs-pinentry"))))
 
    (simple-service 'sshfs-club1
                    home-shepherd-service-type
@@ -82,9 +106,15 @@
                           (requirement '()) 
                           (auto-start? #f) ;; Démarre sur demande, pas au boot
                           (start #~(make-forkexec-constructor
-                                    '("sshfs" "lateci@club1.fr:/home/lateci" "/home/thomas_rm/Club1"
-                                      "-f" ;; Requis par Shepherd
-                                      "-o" "IdentityFile=/home/thomas_rm/.ssh/id_ed25519_club1,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3")
+                                    (list "sshfs"
+                                          #$(string-append (prive 'sshfs-hote) ":"
+                                                           (prive 'sshfs-distant))
+                                          #$(string-append %home "/Club1")
+                                          "-f" ;; Requis par Shepherd
+                                          "-o"
+                                          #$(string-append
+                                             "IdentityFile=" %home "/" (prive 'sshfs-cle)
+                                             ",reconnect,ServerAliveInterval=15,ServerAliveCountMax=3"))
                                     #:log-file (string-append (getenv "HOME") "/.local/var/log/sshfs-club1.log")))
                           (stop  #~(make-kill-destructor)))))
    

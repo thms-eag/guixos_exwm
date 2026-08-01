@@ -4,6 +4,29 @@
 
 (use-service-modules base cups networking ssh xorg pm)
 
+;;; Valeurs propres à cette machine — identifiants de partitions, accès
+;;; distants.  Elles vivent dans prive.scm, à côté de ce fichier, qui n'est
+;;; pas versionné.  Voir prive.scm.exemple.
+;;;
+;;; Contrairement à la configuration Emacs, qui se rabat sur des valeurs de
+;;; démonstration, on échoue ici explicitement : construire un système qui
+;;; désigne la mauvaise partition serait pire qu'un arrêt net.
+
+(define %prive
+  (let* ((ici (or (and=> (current-filename) dirname) "."))
+         (fichier (string-append ici "/prive.scm")))
+    (if (file-exists? fichier)
+        (call-with-input-file fichier read)
+        '())))
+
+(define (prive cle)
+  "Valeur privée CLE, ou erreur explicite si elle manque."
+  (or (assq-ref %prive cle)
+      (error (string-append
+              "valeur privée absente : " (symbol->string cle)
+              " — copier prive.scm.exemple en prive.scm et y porter les"
+              " valeurs réelles (lsblk -o NAME,MOUNTPOINT,UUID)"))))
+
 (operating-system
  (locale "fr_FR.utf8")
  (timezone "Europe/Paris")
@@ -73,12 +96,12 @@
               (targets (list "/boot/efi"))
               (keyboard-layout keyboard-layout)))
  (swap-devices (list (swap-space
-                      (target (uuid "a9e9d62e-f2c7-487a-a1cf-ed463e7da1e2")))))
+                      (target (uuid (prive 'uuid-swap))))))
  (file-systems (cons* (file-system
 		       (mount-point "/boot/efi")
-		       (device (uuid "D8A6-ABF1" 'fat32))
+		       (device (uuid (prive 'uuid-efi) 'fat32))
 		       (type "vfat"))
                       (file-system
 		       (mount-point "/")
-		       (device (uuid "54c7e021-1f3d-4613-8362-5e479c7f2c8f" 'ext4))
+		       (device (uuid (prive 'uuid-racine) 'ext4))
 		       (type "ext4")) %base-file-systems)))

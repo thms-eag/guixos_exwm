@@ -1,0 +1,28 @@
+;;; prive.scm --- Valeurs propres à cette machine        -*- scheme -*-
+;;;
+;;; Copier ce fichier en « prive.scm » à côté de config.scm, puis y porter
+;;; les valeurs réelles.  « prive.scm » est ignoré par Git : rien de ce qui
+;;; s'y trouve ne remonte dans le dépôt public.
+;;;
+;;;     cp prive.scm.exemple prive.scm
+;;;
+;;; Le contenu est une simple liste associative, lue et non évaluée : pas de
+;;; parenthèse ouvrante supplémentaire, pas de quote, pas de code.
+;;;
+;;; Les identifiants de partitions se relèvent avec :
+;;;
+;;;     lsblk -o NAME,MOUNTPOINT,UUID
+;;;
+;;; Contrairement à la configuration Emacs, qui se contente de valeurs de
+;;; démonstration lorsque son fichier privé manque, la configuration système
+;;; échoue explicitement si l'une de ces valeurs est absente : construire un
+;;; système qui désigne la mauvaise partition serait pire qu'un arrêt net.
+
+((uuid-racine   . "00000000-0000-0000-0000-000000000000")
+ (uuid-efi      . "0000-0000")
+ (uuid-swap     . "00000000-0000-0000-0000-000000000000")
+
+ ;; Partage distant monté par SSHFS à la demande (« herd start sshfs-club1 »).
+ (sshfs-hote    . "utilisateur@exemple.org")
+ (sshfs-distant . "/home/utilisateur")
+ (sshfs-cle     . ".ssh/id_ed25519_exemple"))

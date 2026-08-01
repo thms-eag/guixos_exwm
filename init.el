@@ -56,6 +56,381 @@
 (defvar ews-bibtex-directory nil
   "Repli lorsque ews.el est absent.")
 
+;;;; IDENTITÉ ET DONNÉES PRIVÉES :::::::::::::::::::::::::::::::::::::::::::::
+;;
+;; Ce qui décrit l'association vit ici, en un seul endroit, plutôt que recopié
+;; dans chaque modèle de document.
+;;
+;; Les valeurs qui n'ont pas leur place dans un dépôt public — coordonnées
+;; bancaires, adresse postale, téléphone, courriel personnel — portent
+;; ci-dessous une valeur de démonstration.  Les valeurs réelles vivent dans
+;; ~/.config/lateci/prive.el, hors du dépôt, chargé plus bas s'il existe.
+;; Voir prive.el.exemple pour le modèle.
+
+(require 'cl-lib)
+
+;;;;; --- Identité publique ---
+
+(defvar lateci-org-nom "LA TECI"
+  "Nom d'usage de l'association, tel qu'il s'imprime en tête des documents.")
+
+(defvar lateci-org-raison-sociale
+  "Association Terrain d'Expérimentation de Créations \\& d'Initiatives"
+  "Dénomination complète.  Échappée pour LaTeX : le « & » y porte sa barre.")
+
+(defvar lateci-org-courriel "lateci@club1.fr"
+  "Adresse de courriel de l'association.")
+
+(defvar lateci-org-site "https://lateci.club1.fr"
+  "Site public de l'association.")
+
+(defvar lateci-org-logo "~/Bureau/logo.jpg"
+  "Logo imprimé en tête des devis et factures, ou nil pour s'en passer.")
+
+(defvar lateci-org-couleur "40, 80, 120"
+  "Couleur institutionnelle, en composantes RVB pour \\definecolor.")
+
+;;;;; --- Données privées : valeurs de démonstration ---
+
+(defvar lateci-org-adresse '("1 rue de l'Exemple" "00000 VILLE")
+  "Adresse postale du siège, une chaîne par ligne imprimée.")
+
+(defvar lateci-org-siret "00000000000000"
+  "Numéro SIRET de l'association.")
+
+(defvar lateci-org-ape "00.00Z"
+  "Code APE de l'association.")
+
+(defvar lateci-banque-iban "FR76 0000 0000 0000 0000 0000 000"
+  "IBAN imprimé en pied de devis et de facture.")
+
+(defvar lateci-banque-bic "XXXXXXXX"
+  "BIC imprimé en pied de devis et de facture.")
+
+(defvar lateci-tel "+33 0 00 00 00 00"
+  "Téléphone repris dans la signature de courriel.")
+
+(defvar lateci-courriel-perso "personne@exemple.org"
+  "Adresse personnelle, distincte de celle de l'association.")
+
+;;;;; --- Chargement du fichier privé ---
+
+(defvar lateci-prive-fichier
+  (expand-file-name "lateci/prive.el"
+                    (or (getenv "XDG_CONFIG_HOME") "~/.config"))
+  "Fichier des valeurs privées, hors du dépôt.
+
+Il est délibérément placé hors de `user-emacs-directory' : celui-ci peut
+être effacé ou recloné, ce qui emporterait le fichier avec lui.")
+
+(if (file-exists-p lateci-prive-fichier)
+    (load lateci-prive-fichier nil :sans-message)
+  (display-warning
+   'lateci
+   (format "%s est absent : les documents s'impriment avec des coordonnées de démonstration.
+Copier prive.el.exemple vers ce chemin pour rétablir les vraies valeurs."
+           lateci-prive-fichier)
+   :warning))
+
+;;;; DOCUMENTS COMMERCIAUX ::::::::::::::::::::::::::::::::::::::::::::::::::::
+;;
+;; Devis, facture et reçu partagent leur en-tête, leur pied et leur mise en
+;; page.  Ils sont donc assemblés à partir de fragments communs plutôt que
+;; recopiés : chaque coordonnée de l'association n'apparaît qu'une fois.
+
+(defvar usr--devis-client "")
+(defvar usr--devis-num "")
+(defvar usr--devis-tags "")
+
+(defvar usr--facture-client "")
+(defvar usr--facture-num "")
+(defvar usr--facture-tags "")
+
+(defvar usr--recu-client "")
+(defvar usr--recu-num "")
+(defvar usr--recu-tags "")
+
+(defconst lateci--latex-couleur-nom "lateciblue"
+  "Nom LaTeX de la couleur institutionnelle.")
+
+(defun lateci--numero-suivant (genre)
+  "Numéro suivant pour GENRE (\"devis\", \"facture\", \"recu\").
+Le compteur repart à 01 à chaque nouvelle année.  Il est conservé dans
+GENRE-counter.el, au sein de `user-emacs-directory'."
+  (let* ((fichier (expand-file-name (format "%s-counter.el" genre)
+                                    user-emacs-directory))
+         (annee (format-time-string "%Y"))
+         (etat (if (file-exists-p fichier)
+                   (with-temp-buffer
+                     (insert-file-contents fichier)
+                     (read (current-buffer)))
+                 '("" . 0)))
+         (rang (if (string= annee (car etat)) (1+ (cdr etat)) 1)))
+    (with-temp-file fichier
+      (insert (prin1-to-string (cons annee rang))))
+    (format "%02d" rang)))
+
+(defun lateci--document-cible (genre invite-client invite-tags)
+  "Fonction cible d'un modèle de capture, pour GENRE.
+Demande le client puis les mots-clés, tire le numéro suivant et renvoie le
+chemin du fichier Org à créer."
+  (let ((v-client (intern (format "usr--%s-client" genre)))
+        (v-num    (intern (format "usr--%s-num" genre)))
+        (v-tags   (intern (format "usr--%s-tags" genre))))
+    (lambda ()
+      (set v-client (read-string invite-client))
+      (let ((saisie (read-string invite-tags)))
+        (set v-tags (if (string-empty-p saisie)
+                        genre
+                      (concat genre "_"
+                              (replace-regexp-in-string
+                               "[^[:alnum:]]+" "_" (downcase saisie))))))
+      (set v-num (lateci--numero-suivant genre))
+      (expand-file-name
+       (format "%s--%s-%s__%s.org"
+               (format-time-string "%Y%m%dT%H%M%S")
+               (replace-regexp-in-string
+                "[^[:alnum:]]+" "-" (downcase (symbol-value v-client)))
+               (symbol-value v-num)
+               (symbol-value v-tags))
+       "~/Bureau/"))))
+
+(defun lateci--latex-emetteur (couleur)
+  "Bloc LaTeX de l'émetteur : logo, nom, adresse, contacts.
+Avec COULEUR, le nom est teinté et le logo présent ; sans, le bloc est sobre."
+  (concat
+   "\\begin{minipage}[t]{0.5\\textwidth}\n"
+   (if couleur
+       (concat
+        "  \\vspace{-1cm} % Alignement vertical\n"
+        (if lateci-org-logo
+            (concat "  \\includegraphics[width=4cm]{"
+                    (expand-file-name lateci-org-logo)
+                    "} \\\\[0.5em] % <-- DÉCOMMENTER POUR LE LOGO\n")
+          "")
+        "  {\\LARGE \\textbf{\\textcolor{" lateci--latex-couleur-nom "}{"
+        lateci-org-nom "}}} \\\\[0.5em]\n")
+     (concat
+      "  \\vspace{-1cm}\n"
+      "  {\\LARGE \\textbf{" lateci-org-nom "}} \\\\[0.5em]\n"))
+   (mapconcat (lambda (ligne) (concat "  " ligne " \\\\\n"))
+              (butlast lateci-org-adresse) "")
+   "  " (car (last lateci-org-adresse)) " \\\\[0.5em]\n"
+   "  " lateci-org-courriel " \\\\\n"
+   "  " lateci-org-site "\n"
+   "\\end{minipage}%\n"))
+
+(defun lateci--latex-identite-legale ()
+  "Deux lignes LaTeX : dénomination complète, puis SIRET et code APE."
+  (concat
+   "  " lateci-org-raison-sociale " \\\\\n"
+   "  SIRET : " lateci-org-siret " | APE : " lateci-org-ape " \\\\\n"))
+
+(defun lateci--latex-coordonnees-bancaires ()
+  "Pied de page droit des devis et factures : identité légale et banque."
+  (concat
+   "  \\textbf{Coordonnées bancaires} \\\\[0.2em]\n"
+   (lateci--latex-identite-legale)
+   "  IBAN : \\texttt{" lateci-banque-iban "} \\\\\n"
+   "  BIC : \\texttt{" lateci-banque-bic "}\n"))
+
+(defun lateci--latex-identifiant-association ()
+  "Pied de page droit des reçus : identité légale seule, sans banque."
+  (concat
+   "  \\textbf{Identifiant association} \\\\[0.2em]\n"
+   (lateci--latex-identite-legale)))
+
+(defconst lateci--latex-conditions-paiement
+  (concat
+   "  \\textbf{Conditions de paiement} \\\\[0.2em]\n"
+   "  Délai de paiement : 30 jours à date d'émission. \\\\\n"
+   "  Règlement par Chèque ou virement bancaire. \\\\\n"
+   "  Escompte pour règlement anticipé : 0\\textpercent{%} \\\\\n"
+   "  \\\\\n"
+   "  TVA non applicable art. 293b du CGI. \\\\\n"
+   "  \\\\\n"
+   "  En cas de retard de paiement, une pénalité égale à 3 fois le taux d'intérêt légal sera exigible \\\\\n"
+   "  \\texttt{\\textit{Décret 2009-138 du 9 février 2009}} \\\\\n"
+   "  \\\\\n"
+   "  Pour les professionnels, une indemnité minimum forfaitaire de 40 euros pour frais de recouvrement sera exigible \\\\\n"
+   "  \\texttt{\\textit{Décret 2012-1115 du 9 octobre 2012}}\n")
+  "Mentions légales de paiement, communes au devis et à la facture.")
+
+(defconst lateci--latex-tableau-prestations
+  (concat
+   "#+ATTR_LATEX: :align p{8.5cm} c r r :placement [h]\n"
+   "| Description de la prestation | Qté | Prix U. (HT) | Total (HT) |\n"
+   "|------------------------------+-----+--------------+------------|\n"
+   "| %?                           |   1 |            0 |          0 |\n"
+   "|------------------------------+-----+--------------+------------|\n"
+   "| *TOTAL*                      |     |              |          0 |\n")
+  "Tableau de prestations du devis et de la facture, sans sa ligne #+TBLFM.")
+
+(cl-defun lateci--document
+    (&key touche type genre invite-client invite-tags objet
+          couleur police boite etiquette tableau tblfm
+          pied-gauche pied-droit signature)
+  "Assemble le modèle de capture Org d'un document commercial.
+
+TOUCHE et TYPE nomment l'entrée ; GENRE sert de préfixe aux variables
+`usr--GENRE-num' et consorts, et de racine au fichier compteur.  COULEUR
+active le logo et la teinte institutionnelle ; POLICE ajoute un paquet
+LaTeX.  BOITE encadre l'adresse du destinataire, ETIQUETTE le désigne."
+  (let ((num    (concat "%(identity usr--" genre "-num)"))
+        (client (concat "%(identity usr--" genre "-client)")))
+    (list
+     touche type 'plain
+     (list 'file (lateci--document-cible genre invite-client invite-tags))
+     (concat
+      ;; --- Préambule Org et LaTeX ---
+      "#+TITLE: " type " %<%Y%m%d>-" num "\n"
+      "#+AUTHOR: " lateci-org-nom "\n"
+      "#+OPTIONS: num:nil title:nil toc:nil\n"
+      "#+LATEX_CLASS: article\n"
+      "#+LATEX_CLASS_OPTIONS: [11pt, a4paper]\n"
+      "#+LATEX_HEADER: \\usepackage[margin=2cm]{geometry}\n"
+      (if police (concat "#+LATEX_HEADER: \\usepackage{" police "}\n") "")
+      "#+LATEX_HEADER: \\usepackage{graphicx}\n"
+      (if couleur
+          (concat
+           "#+LATEX_HEADER: \\usepackage{xcolor}\n"
+           "#+LATEX_HEADER: \\definecolor{" lateci--latex-couleur-nom
+           "}{RGB}{" lateci-org-couleur "} % Couleur institutionnelle\n"
+           "#+LATEX_HEADER: \\pagestyle{empty} % Suppression de la numérotation des pages\n")
+        "#+LATEX_HEADER: \\pagestyle{empty}\n")
+      "\n"
+      ;; --- En-tête ---
+      "#+BEGIN_EXPORT latex\n"
+      "% --------------------------------------------------------\n"
+      "% EN-TÊTE\n"
+      "% --------------------------------------------------------\n"
+      (lateci--latex-emetteur couleur)
+      "\\begin{minipage}[t]{0.5\\textwidth}\n"
+      "  \\begin{flushright}\n"
+      "    \\vspace{-1cm}\n"
+      "    {\\Huge \\textbf{"
+      (if couleur (concat "\\textcolor{" lateci--latex-couleur-nom "}{" type "}") type)
+      "}} \\\\[0.5em]\n"
+      "    \\textbf{Numéro :} %<%Y%m%d>-" num " \\\\\n"
+      "    \\textbf{Date :} %<%d %B %Y> \\\\[1.5em]\n"
+      boite
+      "      \\begin{minipage}{0.8\\textwidth}\n"
+      "        \\vspace{0.2cm}\n"
+      "        \\textbf{" etiquette "} \\\\\n"
+      "        \\textbf{" client "} \\\\\n"
+      "        %^{Adresse du Client}\n"
+      "        \\vspace{0.2cm}\n"
+      "      \\end{minipage}\n"
+      "    }\n"
+      "  \\end{flushright}\n"
+      "\\end{minipage}\n"
+      "\n"
+      "\\vspace{1.5cm}\n"
+      "#+END_EXPORT\n"
+      "\n"
+      ;; --- Corps ---
+      "* Objet : " objet "\n"
+      "\n"
+      tableau
+      "#+TBLFM: " tblfm "\n"
+      "\n"
+      ;; --- Pied ---
+      "#+BEGIN_EXPORT latex\n"
+      "\\vspace{1cm}\n"
+      "\\rule{\\textwidth}{0.4pt}\n"
+      "\\vspace{0.5cm}\n"
+      (if couleur "\n" "")
+      "% --------------------------------------------------------\n"
+      "% PIED DE DOCUMENT\n"
+      "% --------------------------------------------------------\n"
+      "\\noindent\n"
+      "\\begin{minipage}[t]{0.45\\textwidth}\n"
+      "  \\small\n"
+      pied-gauche
+      "\\end{minipage}%\n"
+      "\\hfill\n"
+      "\\begin{minipage}[t]{0.45\\textwidth}\n"
+      "  \\small\n"
+      pied-droit
+      "\\end{minipage}\n"
+      "\n"
+      "\\vspace{2cm}\n"
+      "\n"
+      ;; --- Signature ---
+      "% --------------------------------------------------------\n"
+      "% ZONE DE SIGNATURE\n"
+      "% --------------------------------------------------------\n"
+      "\\hfill\n"
+      "\\begin{minipage}[t]{0.45\\textwidth}\n"
+      "  \\centering\n"
+      signature
+      "  \\rule{6cm}{0.4pt}\n"
+      "\\end{minipage}\n"
+      "#+END_EXPORT\n")
+     :jump-to-captured t)))
+
+(defun lateci--modele-devis ()
+  "Modèle de capture du devis."
+  (lateci--document
+   :touche "d" :type "DEVIS" :genre "devis"
+   :invite-client "Nom du client : "
+   :invite-tags "Tags additionnels (optionnels, ex: asso formation) : "
+   :objet "%^{Objet du devis}"
+   :couleur t
+   :boite (concat "    % Boîte d'adresse du destinataire\n"
+                  "    \\colorbox{gray!10}{\n")
+   :etiquette "Destinataire"
+   :tableau lateci--latex-tableau-prestations
+   :tblfm "$4=$2*$3::@3$4=vsum(@2$4..@-1$4);%.2f"
+   :pied-gauche (concat lateci--latex-conditions-paiement "\n")
+   :pied-droit (lateci--latex-coordonnees-bancaires)
+   :signature (concat "  \\textbf{Bon pour accord} \\\\\n"
+                      "  \\textit{Date, signature et cachet du client} \\\\[2.5cm]\n")))
+
+(defun lateci--modele-facture ()
+  "Modèle de capture de la facture."
+  (lateci--document
+   :touche "F" :type "FACTURE" :genre "facture"
+   :invite-client "Nom du client : "
+   :invite-tags "Tags additionnels (optionnels) : "
+   :objet "%^{Objet de la facture}"
+   :couleur t
+   :boite (concat "    % Boîte d'adresse du destinataire\n"
+                  "    \\colorbox{gray!10}{\n")
+   :etiquette "Destinataire"
+   :tableau lateci--latex-tableau-prestations
+   :tblfm "$4=$2*$3;N :: @>$4=vsum(@I..@II);%.2f"
+   :pied-gauche lateci--latex-conditions-paiement
+   :pied-droit (lateci--latex-coordonnees-bancaires)
+   :signature "  \\textit{Cachet et signature de l'association} \\\\[2.5cm]\n"))
+
+(defun lateci--modele-recu ()
+  "Modèle de capture du reçu."
+  (lateci--document
+   :touche "u" :type "REÇU" :genre "recu"
+   :invite-client "Nom du payeur : "
+   :invite-tags "Tags additionnels (optionnels) : "
+   :objet "%^{Nature du paiement (ex: Adhésion, Don)}"
+   :couleur nil
+   :police "ebgaramond"
+   :boite "    \\fbox{\n"
+   :etiquette "Payeur :"
+   :tableau (concat
+             "#+ATTR_LATEX: :align p{8.5cm} c r r :placement [h]\n"
+             "| Description                                  | Qté | Prix U. (HT) | Total (HT) |\n"
+             "|----------------------------------------------+-----+--------------+------------|\n"
+             "| %?                                           |   1 |            0 |          0 |\n"
+             "|----------------------------------------------+-----+--------------+------------|\n"
+             "| *TOTAL RÉGLÉ*                                |     |              |          0 |\n")
+   :tblfm "$4=$2*$3;N :: @>$4=vsum(@I..@II);%.2f"
+   :pied-gauche (concat
+                 "  \\textbf{Détail du règlement} \\\\[0.2em]\n"
+                 "  Reçu le : %^{Date de règlement (ex:%<%d %B %Y>)} \\\\\n"
+                 "  Moyen de paiement : %^{Moyen de paiement (ex: Chèque, Virement, Espèces)} \\\\\n"
+                 "  \\textit{Ce document atteste la bonne réception des fonds pour solde de tout compte.}\n")
+   :pied-droit (lateci--latex-identifiant-association)
+   :signature "  \\textit{Pour acquit, signature du trésorier/représentant} \\\\[2.5cm]\n"))
+
 
 ;;;; Org-mode
 (use-package org
@@ -69,75 +444,6 @@
         '("~/Bureau/Notes.org"         
           "~/Bureau/FP6.org"))
 
-;; =======================================================
-;; COMPTEURS POUR DEVIS
-;; =======================================================
-(defvar usr--devis-client "")
-(defvar usr--devis-num "")
-(defvar usr--devis-tags "")
-(defvar usr--devis-counter-file (expand-file-name "devis-counter.el" user-emacs-directory))
-
-(defun usr--get-next-devis-num ()
-  "Génère le prochain numéro de devis. Le compteur repart à 01 chaque nouvelle année."
-  (let* ((current-year (format-time-string "%Y"))
-         ;; Lit le fichier s'il existe, sinon initialise une paire vide
-         (data (if (file-exists-p usr--devis-counter-file)
-                   (with-temp-buffer
-                     (insert-file-contents usr--devis-counter-file)
-                     (read (current-buffer)))
-                 '("" . 0)))
-         (last-year (car data))
-         (last-count (cdr data))
-         (new-count (if (string= current-year last-year) (1+ last-count) 1)))
-    (with-temp-file usr--devis-counter-file
-      (insert (prin1-to-string (cons current-year new-count))))
-    (format "%02d" new-count)))
-
-;; =======================================================
-;; COMPTEURS POUR FACTURES
-;; =======================================================
-(defvar usr--facture-client "")
-(defvar usr--facture-num "")
-(defvar usr--facture-tags "")
-(defvar usr--facture-counter-file (expand-file-name "facture-counter.el" user-emacs-directory))
-
-(defun usr--get-next-facture-num ()
-  "Génère le prochain numéro de facture (réinitialisation annuelle)."
-  (let* ((current-year (format-time-string "%Y"))
-         (data (if (file-exists-p usr--facture-counter-file)
-                   (with-temp-buffer
-                     (insert-file-contents usr--facture-counter-file)
-                     (read (current-buffer)))
-                 '("" . 0)))
-         (last-year (car data))
-         (last-count (cdr data))
-         (new-count (if (string= current-year last-year) (1+ last-count) 1)))
-    (with-temp-file usr--facture-counter-file
-      (insert (prin1-to-string (cons current-year new-count))))
-    (format "%02d" new-count)))
-
-;; =======================================================
-;; COMPTEURS POUR REÇUS
-;; =======================================================
-(defvar usr--recu-client "")
-(defvar usr--recu-num "")
-(defvar usr--recu-tags "")
-(defvar usr--recu-counter-file (expand-file-name "recu-counter.el" user-emacs-directory))
-
-(defun usr--get-next-recu-num ()
-  "Génère le prochain numéro de reçu (réinitialisation annuelle)."
-  (let* ((current-year (format-time-string "%Y"))
-         (data (if (file-exists-p usr--recu-counter-file)
-                   (with-temp-buffer
-                     (insert-file-contents usr--recu-counter-file)
-                     (read (current-buffer)))
-                 '("" . 0)))
-         (last-year (car data))
-         (last-count (cdr data))
-         (new-count (if (string= current-year last-year) (1+ last-count) 1)))
-    (with-temp-file usr--recu-counter-file
-      (insert (prin1-to-string (cons current-year new-count))))
-    (format "%02d" new-count)))
   
   :custom
   ;; --- Apparence et Rendu ---
@@ -195,7 +501,7 @@
   
   ;;;; --- Modèles de Capture ---
   (org-capture-templates
-   '(("f" "Fleeting note" item (file+headline org-default-notes-file "Notes") "- %?")
+   `(("f" "Fleeting note" item (file+headline org-default-notes-file "Notes") "- %?")
      ("j" "Journal Interstitiel" entry (file denote-journal-path-to-new-or-existing-entry) "* %<%H:%M>\n** DONE %?\n** NEXT " :empty-lines 1)
      ("n" "Permanent note" plain (file denote-last-path) #'denote-org-capture :no-save t :immediate-finish nil :kill-buffer t :jump-to-captured t)
 
@@ -215,353 +521,13 @@
      ("e" "EVNT" entry (file+headline org-default-notes-file "Tasks") "* EVNT %i%?")
 
      ;; ------------------------------------------------------
-     ;; MODÈLE DEVIS
-     ;; ------------------------------------------------------     
-     ("d" "DEVIS" plain
-      (file (lambda ()
-              (setq usr--devis-client (read-string "Nom du client : "))              
-              (let ((user-tags (read-string "Tags additionnels (optionnels, ex: asso formation) : ")))
-                (setq usr--devis-tags (if (string-empty-p user-tags)
-                                             "devis"
-                                           (concat "devis_" (replace-regexp-in-string "[^[:alnum:]]+" "_" (downcase user-tags))))))              
-              (setq usr--devis-num (usr--get-next-devis-num))
-              (let* ((time-str (format-time-string "%Y%m%dT%H%M%S"))
-                     (client-slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase usr--devis-client)))
-                     (filename (format "%s--%s-%s__%s.org" time-str client-slug usr--devis-num usr--devis-tags)))
-                (expand-file-name filename "~/Bureau/"))))
-      "#+TITLE: DEVIS %<%Y%m%d>-%(identity usr--devis-num)
-#+AUTHOR: LA TECI
-#+OPTIONS: num:nil title:nil toc:nil
-#+LATEX_CLASS: article
-#+LATEX_CLASS_OPTIONS: [11pt, a4paper]
-#+LATEX_HEADER: \\usepackage[margin=2cm]{geometry}
-#+LATEX_HEADER: \\usepackage{graphicx}
-#+LATEX_HEADER: \\usepackage{xcolor}
-#+LATEX_HEADER: \\definecolor{lateciblue}{RGB}{40, 80, 120} % Couleur institutionnelle
-#+LATEX_HEADER: \\pagestyle{empty} % Suppression de la numérotation des pages
-
-#+BEGIN_EXPORT latex
-% --------------------------------------------------------
-% EN-TÊTE
-% --------------------------------------------------------
-\\begin{minipage}[t]{0.5\\textwidth}
-  \\vspace{-1cm} % Alignement vertical
-  \\includegraphics[width=4cm]{/home/thomas_rm/Bureau/logo.jpg} \\\\[0.5em] % <-- DÉCOMMENTER POUR LE LOGO
-  {\\LARGE \\textbf{\\textcolor{lateciblue}{LA TECI}}} \\\\[0.5em]
-  9bis Chemin des Tillières \\\\
-  41000 BLOIS \\\\[0.5em]
-  lateci@club1.fr \\\\
-  https://lateci.club1.fr
-\\end{minipage}%
-\\begin{minipage}[t]{0.5\\textwidth}
-  \\begin{flushright}
-    \\vspace{-1cm}
-    {\\Huge \\textbf{\\textcolor{lateciblue}{DEVIS}}} \\\\[0.5em]
-    \\textbf{Numéro :} %<%Y%m%d>-%(identity usr--devis-num) \\\\
-    \\textbf{Date :} %<%d %B %Y> \\\\[1.5em]
-    % Boîte d'adresse du destinataire
-    \\colorbox{gray!10}{
-      \\begin{minipage}{0.8\\textwidth}
-        \\vspace{0.2cm}
-        \\textbf{Destinataire} \\\\
-        \\textbf{%(identity usr--devis-client)} \\\\
-        %^{Adresse du Client}
-        \\vspace{0.2cm}
-      \\end{minipage}
-    }
-  \\end{flushright}
-\\end{minipage}
-
-\\vspace{1.5cm}
-#+END_EXPORT
-
-* Objet : %^{Objet du devis}
-
-#+ATTR_LATEX: :align p{8.5cm} c r r :placement [h]
-| Description de la prestation | Qté | Prix U. (HT) | Total (HT) |
-|------------------------------+-----+--------------+------------|
-| %?                           |   1 |            0 |          0 |
-|------------------------------+-----+--------------+------------|
-| *TOTAL*                      |     |              |          0 |
-#+TBLFM: $4=$2*$3::@3$4=vsum(@2$4..@-1$4);%.2f
-
-#+BEGIN_EXPORT latex
-\\vspace{1cm}
-\\rule{\\textwidth}{0.4pt}
-\\vspace{0.5cm}
-
-% --------------------------------------------------------
-% PIED DE DOCUMENT
-% --------------------------------------------------------
-\\noindent
-\\begin{minipage}[t]{0.45\\textwidth}
-  \\small
-  \\textbf{Conditions de paiement} \\\\[0.2em]
-  Délai de paiement : 30 jours à date d'émission. \\\\
-  Règlement par Chèque ou virement bancaire. \\\\
-  Escompte pour règlement anticipé : 0\\textpercent{\%} \\\\
-  \\\\
-  TVA non applicable art. 293b du CGI. \\\\
-  \\\\
-  En cas de retard de paiement, une pénalité égale à 3 fois le taux d'intérêt légal sera exigible \\\\
-  \\texttt{\\textit{Décret 2009-138 du 9 février 2009}} \\\\
-  \\\\
-  Pour les professionnels, une indemnité minimum forfaitaire de 40 euros pour frais de recouvrement sera exigible \\\\
-  \\texttt{\\textit{Décret 2012-1115 du 9 octobre 2012}}
-
-\\end{minipage}%
-\\hfill
-\\begin{minipage}[t]{0.45\\textwidth}
-  \\small
-  \\textbf{Coordonnées bancaires} \\\\[0.2em]
-  Association Terrain d'Expérimentation de Créations \\& d'Initiatives \\\\
-  SIRET : 94386876000019 | APE : 94.99Z \\\\
-  IBAN : \\texttt{FR76 1027 8371 6000 0132 5090 255} \\\\
-  BIC : \\texttt{CMCIFR2A}
-\\end{minipage}
-
-\\vspace{2cm}
-
-% --------------------------------------------------------
-% ZONE DE SIGNATURE
-% --------------------------------------------------------
-\\hfill
-\\begin{minipage}[t]{0.45\\textwidth}
-  \\centering
-  \\textbf{Bon pour accord} \\\\
-  \\textit{Date, signature et cachet du client} \\\\[2.5cm]
-  \\rule{6cm}{0.4pt}
-\\end{minipage}
-#+END_EXPORT
-"
-      :jump-to-captured t)
-
+     ;; DOCUMENTS COMMERCIAUX
+     ;; Assemblés depuis la section du même nom, plus haut : l'identité de
+     ;; l'association n'est écrite qu'à un seul endroit.
      ;; ------------------------------------------------------
-     ;; MODÈLE FACTURE
-     ;; ------------------------------------------------------
-     ("F" "FACTURE" plain
-      (file (lambda ()
-              (setq usr--facture-client (read-string "Nom du client : "))
-              
-              (let ((user-tags (read-string "Tags additionnels (optionnels) : ")))
-                (setq usr--facture-tags (if (string-empty-p user-tags)
-                                           "facture"
-                                         (concat "facture_" (replace-regexp-in-string "[^[:alnum:]]+" "_" (downcase user-tags))))))
-              
-              (setq usr--facture-num (usr--get-next-facture-num))
-              (let* ((time-str (format-time-string "%Y%m%dT%H%M%S"))
-                     (client-slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase usr--facture-client)))
-                     (filename (format "%s--%s-%s__%s.org" time-str client-slug usr--facture-num usr--facture-tags)))
-                (expand-file-name filename "~/Bureau/"))))
-      "#+TITLE: FACTURE %<%Y%m%d>-%(identity usr--facture-num)
-#+AUTHOR: LA TECI
-#+OPTIONS: num:nil title:nil toc:nil
-#+LATEX_CLASS: article
-#+LATEX_CLASS_OPTIONS: [11pt, a4paper]
-#+LATEX_HEADER: \\usepackage[margin=2cm]{geometry}
-#+LATEX_HEADER: \\usepackage{graphicx}
-#+LATEX_HEADER: \\usepackage{xcolor}
-#+LATEX_HEADER: \\definecolor{lateciblue}{RGB}{40, 80, 120} % Couleur institutionnelle
-#+LATEX_HEADER: \\pagestyle{empty} % Suppression de la numérotation des pages
-
-#+BEGIN_EXPORT latex
-% --------------------------------------------------------
-% EN-TÊTE
-% --------------------------------------------------------
-\\begin{minipage}[t]{0.5\\textwidth}
-  \\vspace{-1cm} % Alignement vertical
-  \\includegraphics[width=4cm]{/home/thomas_rm/Bureau/logo.jpg} \\\\[0.5em] % <-- DÉCOMMENTER POUR LE LOGO
-  {\\LARGE \\textbf{\\textcolor{lateciblue}{LA TECI}}} \\\\[0.5em]
-  9bis Chemin des Tillières \\\\
-  41000 BLOIS \\\\[0.5em]
-  lateci@club1.fr \\\\
-  https://lateci.club1.fr
-\\end{minipage}%
-\\begin{minipage}[t]{0.5\\textwidth}
-  \\begin{flushright}
-    \\vspace{-1cm}
-    {\\Huge \\textbf{\\textcolor{lateciblue}{FACTURE}}} \\\\[0.5em]
-    \\textbf{Numéro :} %<%Y%m%d>-%(identity usr--facture-num) \\\\
-    \\textbf{Date :} %<%d %B %Y> \\\\[1.5em]
-    % Boîte d'adresse du destinataire
-    \\colorbox{gray!10}{
-      \\begin{minipage}{0.8\\textwidth}
-        \\vspace{0.2cm}
-        \\textbf{Destinataire} \\\\
-        \\textbf{%(identity usr--facture-client)} \\\\
-        %^{Adresse du Client}
-        \\vspace{0.2cm}
-      \\end{minipage}
-    }
-  \\end{flushright}
-\\end{minipage}
-
-\\vspace{1.5cm}
-#+END_EXPORT
-
-* Objet : %^{Objet de la facture}
-
-#+ATTR_LATEX: :align p{8.5cm} c r r :placement [h]
-| Description de la prestation | Qté | Prix U. (HT) | Total (HT) |
-|------------------------------+-----+--------------+------------|
-| %?                           |   1 |            0 |          0 |
-|------------------------------+-----+--------------+------------|
-| *TOTAL*                      |     |              |          0 |
-#+TBLFM: $4=$2*$3;N :: @>$4=vsum(@I..@II);%.2f
-
-#+BEGIN_EXPORT latex
-\\vspace{1cm}
-\\rule{\\textwidth}{0.4pt}
-\\vspace{0.5cm}
-
-% --------------------------------------------------------
-% PIED DE DOCUMENT
-% --------------------------------------------------------
-\\noindent
-\\begin{minipage}[t]{0.45\\textwidth}
-  \\small
-  \\textbf{Conditions de paiement} \\\\[0.2em]
-  Délai de paiement : 30 jours à date d'émission. \\\\
-  Règlement par Chèque ou virement bancaire. \\\\
-  Escompte pour règlement anticipé : 0\\textpercent{\%} \\\\
-  \\\\
-  TVA non applicable art. 293b du CGI. \\\\
-  \\\\
-  En cas de retard de paiement, une pénalité égale à 3 fois le taux d'intérêt légal sera exigible \\\\
-  \\texttt{\\textit{Décret 2009-138 du 9 février 2009}} \\\\
-  \\\\
-  Pour les professionnels, une indemnité minimum forfaitaire de 40 euros pour frais de recouvrement sera exigible \\\\
-  \\texttt{\\textit{Décret 2012-1115 du 9 octobre 2012}}
-\\end{minipage}%
-\\hfill
-\\begin{minipage}[t]{0.45\\textwidth}
-  \\small
-  \\textbf{Coordonnées bancaires} \\\\[0.2em]
-  Association Terrain d'Expérimentation de Créations \\& d'Initiatives \\\\
-  SIRET : 94386876000019 | APE : 94.99Z \\\\
-  IBAN : \\texttt{FR76 1027 8371 6000 0132 5090 255} \\\\
-  BIC : \\texttt{CMCIFR2A}
-\\end{minipage}
-
-\\vspace{2cm}
-
-% --------------------------------------------------------
-% ZONE DE SIGNATURE
-% --------------------------------------------------------
-\\hfill
-\\begin{minipage}[t]{0.45\\textwidth}
-  \\centering
-  \\textit{Cachet et signature de l'association} \\\\[2.5cm]
-  \\rule{6cm}{0.4pt}
-\\end{minipage}
-#+END_EXPORT
-"
-      :jump-to-captured t)
-     
-     ;; ------------------------------------------------------
-     ;; MODÈLE REÇU
-     ;; ------------------------------------------------------
-     ("u" "REÇU" plain
-      (file (lambda ()
-              (setq usr--recu-client (read-string "Nom du payeur : "))
-              (let ((user-tags (read-string "Tags additionnels (optionnels) : ")))
-                (setq usr--recu-tags (if (string-empty-p user-tags) "recu"
-                                           (concat "recu_" (replace-regexp-in-string "[^[:alnum:]]+" "_" (downcase user-tags))))))
-              (setq usr--recu-num (usr--get-next-recu-num))
-              (let* ((time-str (format-time-string "%Y%m%dT%H%M%S"))
-                     (client-slug (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase usr--recu-client)))
-                     (filename (format "%s--%s-%s__%s.org" time-str client-slug usr--recu-num usr--recu-tags)))
-                (expand-file-name filename "~/Bureau/"))))
-      "#+TITLE: REÇU %<%Y%m%d>-%(identity usr--recu-num)
-#+AUTHOR: LA TECI
-#+OPTIONS: num:nil title:nil toc:nil
-#+LATEX_CLASS: article
-#+LATEX_CLASS_OPTIONS: [11pt, a4paper]
-#+LATEX_HEADER: \\usepackage[margin=2cm]{geometry}
-#+LATEX_HEADER: \\usepackage{ebgaramond}
-#+LATEX_HEADER: \\usepackage{graphicx}
-#+LATEX_HEADER: \\pagestyle{empty}
-
-#+BEGIN_EXPORT latex
-% --------------------------------------------------------
-% EN-TÊTE
-% --------------------------------------------------------
-\\begin{minipage}[t]{0.5\\textwidth}
-  \\vspace{-1cm}
-  {\\LARGE \\textbf{LA TECI}} \\\\[0.5em]
-  9bis Chemin des Tillières \\\\
-  41000 BLOIS \\\\[0.5em]
-  lateci@club1.fr \\\\
-  https://lateci.club1.fr
-\\end{minipage}%
-\\begin{minipage}[t]{0.5\\textwidth}
-  \\begin{flushright}
-    \\vspace{-1cm}
-    {\\Huge \\textbf{REÇU}} \\\\[0.5em]
-    \\textbf{Numéro :} %<%Y%m%d>-%(identity usr--recu-num) \\\\
-    \\textbf{Date :} %<%d %B %Y> \\\\[1.5em]
-    \\fbox{
-      \\begin{minipage}{0.8\\textwidth}
-        \\vspace{0.2cm}
-        \\textbf{Payeur :} \\\\
-        \\textbf{%(identity usr--recu-client)} \\\\
-        %^{Adresse du Client}
-        \\vspace{0.2cm}
-      \\end{minipage}
-    }
-  \\end{flushright}
-\\end{minipage}
-
-\\vspace{1.5cm}
-#+END_EXPORT
-
-* Objet : %^{Nature du paiement (ex: Adhésion, Don)}
-
-#+ATTR_LATEX: :align p{8.5cm} c r r :placement [h]
-| Description                                  | Qté | Prix U. (HT) | Total (HT) |
-|----------------------------------------------+-----+--------------+------------|
-| %?                                           |   1 |            0 |          0 |
-|----------------------------------------------+-----+--------------+------------|
-| *TOTAL RÉGLÉ*                                |     |              |          0 |
-#+TBLFM: $4=$2*$3;N :: @>$4=vsum(@I..@II);%.2f
-
-#+BEGIN_EXPORT latex
-\\vspace{1cm}
-\\rule{\\textwidth}{0.4pt}
-\\vspace{0.5cm}
-% --------------------------------------------------------
-% PIED DE DOCUMENT
-% --------------------------------------------------------
-\\noindent
-\\begin{minipage}[t]{0.45\\textwidth}
-  \\small
-  \\textbf{Détail du règlement} \\\\[0.2em]
-  Reçu le : %^{Date de règlement (ex:%<%d %B %Y>)} \\\\
-  Moyen de paiement : %^{Moyen de paiement (ex: Chèque, Virement, Espèces)} \\\\
-  \\textit{Ce document atteste la bonne réception des fonds pour solde de tout compte.}
-\\end{minipage}%
-\\hfill
-\\begin{minipage}[t]{0.45\\textwidth}
-  \\small
-  \\textbf{Identifiant association} \\\\[0.2em]
-  Association Terrain d'Expérimentation de Créations \\& d'Initiatives \\\\
-  SIRET : 94386876000019 | APE : 94.99Z \\\\
-\\end{minipage}
-
-\\vspace{2cm}
-
-% --------------------------------------------------------
-% ZONE DE SIGNATURE
-% --------------------------------------------------------
-\\hfill
-\\begin{minipage}[t]{0.45\\textwidth}
-  \\centering
-  \\textit{Pour acquit, signature du trésorier/représentant} \\\\[2.5cm]
-  \\rule{6cm}{0.4pt}
-\\end{minipage}
-#+END_EXPORT
-"
-      :jump-to-captured t))))
+     ,(lateci--modele-devis)
+     ,(lateci--modele-facture)
+     ,(lateci--modele-recu))))
 
   
 
@@ -1638,8 +1604,8 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
         notmuch-archive-tags '("-inbox" "-unread")
         notmuch-saved-searches
 	
-	;; --- Nouveaux Courriels --- 
-        '((:name "Nouveau(x) courriel(s) pour la TECI"
+	;; --- Nouveaux Courriels ---
+        `((:name "Nouveau(x) courriel(s) pour la TECI"
                  :query "tag:unread AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"
                  :key "n")
 	  (:name "Nouveau(x) courriel(s) du Fight-Club"
@@ -1649,7 +1615,8 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
                  :query "tag:unread AND (to:membres.actif-ves@lestempsdarts.lautre.net OR to:commission.numerique@lestempsdarts.lautre.net OR to:actus@lestempsdarts.lautre.net) AND NOT tag:trash"
                  :key "h")
 	   (:name "Nouveau(x) courriel(s) perso"
-                 :query "tag:unread AND to:thomas.millasseau@protonmail.com AND NOT tag:trash"
+                 :query ,(concat "tag:unread AND to:" lateci-courriel-perso
+                                 " AND NOT tag:trash")
                  :key "N")
 	   
 	  ;; --- Boites de récpetion ---	   
@@ -1663,7 +1630,8 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
                  :query "tag:inbox AND (to:membres.actif-ves@lestempsdarts.lautre.net OR to:commission.numerique@lestempsdarts.lautre.net OR to:actus@lestempsdarts.lautre.net) AND NOT tag:trash"
                  :key "H")	  
           (:name "Boite de réception personnelle"
-                 :query "tag:inbox AND to:thomas.millasseau@protonmail.com AND NOT tag:trash"
+                 :query ,(concat "tag:inbox AND to:" lateci-courriel-perso
+                                 " AND NOT tag:trash")
                  :key "P")
 	  
 	  ;; --- Courriels Envoyés ---
@@ -1748,8 +1716,8 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
   (notmuch-search "tag:inbox AND (to:teci.blois@pm.me OR to:lateci@club1.fr OR to:groupi@framagroupes.org) AND NOT tag:trash"))
 
 ;; ENVOI COURRIEL VIA CLUB1 (SMTP)
-(setq user-full-name "LA TECI"
-      user-mail-address "lateci@club1.fr")
+(setq user-full-name lateci-org-nom
+      user-mail-address lateci-org-courriel)
 
 (setq sendmail-program (executable-find "msmtp")
       send-mail-function #'message-send-mail-with-sendmail
@@ -1760,8 +1728,8 @@ Se souvient du dernier dossier utilisé pour ce fichier Org."
 
 (setq message-signature-insert-empty-line t)
 (setq message-signature
-      "~$ thomas r.-m. | https://lateci.club1.fr | +33 7 80 32 63 09
-Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/")
+      (concat "~$ thomas r.-m. | " lateci-org-site " | " lateci-tel "\n"
+              "Documents & flyers en sobriété numérique : https://static.club1.fr/lateci/"))
 
 (global-set-key (kbd "C-x m") #'notmuch-mua-mail)
 ;; Fermer automatiquement le buffer de rédaction après l'envoi du courriel
