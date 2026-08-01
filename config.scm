@@ -2,7 +2,7 @@
 	     (guix gexp)
 	     (gnu system setuid))
 
-(use-service-modules cups networking ssh xorg pm)
+(use-service-modules base cups networking ssh xorg pm)
 
 (operating-system
  (locale "fr_FR.utf8")
@@ -45,6 +45,15 @@
 		     (program (file-append (specification->package "slock") "/bin/slock"))))
 	   
            (udev-rules-service 'light (specification->package "light"))
+
+	   (simple-service 'diode-micmute udev-service-type
+			   (list (udev-rule
+				  "90-micmute.rules"
+				  (string-append
+				   "ACTION==\"add\", SUBSYSTEM==\"leds\", KERNEL==\"platform::micmute\", "
+				   "ATTR{trigger}=\"none\", "
+				   "RUN+=\"/run/current-system/profile/bin/chgrp input /sys/class/leds/%k/brightness\", "
+				   "RUN+=\"/run/current-system/profile/bin/chmod g+w /sys/class/leds/%k/brightness\""))))
 
 	   (simple-service 'xorg-peripheriques
                            etc-service-type

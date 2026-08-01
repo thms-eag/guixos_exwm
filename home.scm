@@ -25,7 +25,7 @@
          "vorbis-tools" "mpg321" "mpv" "alsa-utils"
 	 "hunspell" "hunspell-dict-fr-toutesvariantes"
          "font-dejavu" "font-gnu-unifont" "libreoffice"
-	 "ledger" "graphviz"
+	 "ledger" "graphviz" "ffmpeg" "whisper-cpp"
          
          ;; --- Emacs ---
 	 "emacs" "emacs-exwm" "emacs-xelb"
