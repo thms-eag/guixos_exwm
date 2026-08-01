@@ -132,6 +132,41 @@ Copier prive.el.exemple vers ce chemin pour rétablir les vraies valeurs."
            lateci-prive-fichier)
    :warning))
 
+;;;;; --- Profil machine ---
+;;
+;; Ce qui dépend du matériel plutôt que du goût.  Les valeurs ci-dessous sont
+;; un repli : les vraies sont engendrées par home.scm depuis
+;; machines/<nom>.scm, si bien que la diode du micro — décrite là-bas par une
+;; règle udev — n'est écrite qu'à un seul endroit pour les deux moitiés du
+;; dépôt.  Voir la section « profil machine » de home.scm.
+
+(defvar lateci-machine-nom "inconnue"
+  "Nom de la machine courante, tel que le déclare son profil.")
+
+(defvar lateci-machine-diode-micmute
+  "/sys/class/leds/platform::micmute/brightness"
+  "Fichier de la diode du micro, ou nil pour ne pas la piloter.")
+
+(defvar lateci-machine-verrou-ecran "/run/setuid-programs/slock"
+  "Programme de verrouillage de l'écran.")
+
+(defvar lateci-machine-police-taille 120
+  "Corps de la police par défaut, en dixièmes de point.")
+
+(defvar lateci-machine-seuil-division 120
+  "Largeur à partir de laquelle les fenêtres se divisent côte à côte.")
+
+(defvar lateci-machine-fichier
+  (expand-file-name "lateci/machine.el"
+                    (or (getenv "XDG_DATA_HOME") "~/.local/share"))
+  "Profil machine engendré par Guix Home.
+
+Séparé de `lateci-prive-fichier' à dessein : celui-ci est écrit par
+l'utilisateur, celui-là est un lien vers le dépôt Guix, en lecture seule.")
+
+(when (file-exists-p lateci-machine-fichier)
+  (load lateci-machine-fichier nil :sans-message))
+
 ;;;; DOCUMENTS COMMERCIAUX ::::::::::::::::::::::::::::::::::::::::::::::::::::
 ;;
 ;; Devis, facture et reçu partagent leur en-tête, leur pied et leur mise en
@@ -572,7 +607,7 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
   (let ((fond (face-attribute 'default :background)))
 
     ;; --- Taille de police globale ---
-    (usr--set-face 'default :height 120)
+    (usr--set-face 'default :height lateci-machine-police-taille)
 
     ;; --- Séparateurs fondus dans le fond ---
     ;; Pour une ligne fine visible, remplacer `fond' par "grey50".
@@ -666,7 +701,7 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
 
 ;;;; Window management
 ;;;;; Split windows sensibly
-(setq split-width-threshold 120
+(setq split-width-threshold lateci-machine-seuil-division
       split-height-threshold nil)
 
 (use-package consult
@@ -1039,7 +1074,7 @@ Lecture en Lisp pur, sans lancer de processus — même approche que
   "Verrouille l'écran avec slock.
 Le binaire setuid est fourni par `screen-locker-service-type' (config.scm)."
   (interactive)
-  (start-process "slock" nil "/run/setuid-programs/slock"))
+  (start-process "slock" nil lateci-machine-verrou-ecran))
 
 ;;;; Guix
 (defun usr-guix-mettre-a-jour ()
@@ -2400,7 +2435,7 @@ format Denote et déplacé dans le Bureau ; rien ne subsiste ici.")
 (defvar usr-vocale-marqueur-attente "(transcription en cours…)"
   "Texte déposé sous « * Transcription » tant que le résultat n'est pas là.")
 
-(defvar usr-vocale-diode "/sys/class/leds/platform::micmute/brightness"
+(defvar usr-vocale-diode lateci-machine-diode-micmute
   "Fichier de la diode du micro, ou nil pour ne pas la piloter.
 Sur ThinkPad, cette diode est normalement asservie au noyau par son trigger
 `audio-micmute' ; la règle udev de config.scm la détache et en ouvre

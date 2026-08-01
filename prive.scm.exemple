@@ -18,7 +18,13 @@
 ;;; échoue explicitement si l'une de ces valeurs est absente : construire un
 ;;; système qui désigne la mauvaise partition serait pire qu'un arrêt net.
 
-((uuid-racine   . "00000000-0000-0000-0000-000000000000")
+;; La clé « machine » désigne le profil matériel à charger depuis machines/.
+;; C'est la seule ligne à changer pour installer une machine de plus : le
+;; reste du dépôt est identique partout.
+
+((machine       . "lateci")
+
+ (uuid-racine   . "00000000-0000-0000-0000-000000000000")
  (uuid-efi      . "0000-0000")
  (uuid-swap     . "00000000-0000-0000-0000-000000000000")
 

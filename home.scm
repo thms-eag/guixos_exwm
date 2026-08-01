@@ -26,8 +26,44 @@
               "valeur privée absente : " (symbol->string cle)
               " — copier prive.scm.exemple en prive.scm"))))
 
-(define %utilisateur "thomas_rm")
+;;; Profil de la machine, désigné par prive.scm et décrit dans machines/.
+
+(define %machine
+  (let* ((ici (or (and=> (current-filename) dirname) "."))
+         (fichier (string-append ici "/machines/" (prive 'machine) ".scm")))
+    (if (file-exists? fichier)
+        (call-with-input-file fichier read)
+        (error (string-append "profil machine introuvable : " fichier)))))
+
+(define (machine cle)
+  "Valeur CLE du profil machine, ou erreur explicite si elle manque."
+  (or (assq-ref %machine cle)
+      (error (string-append "profil machine incomplet : "
+                            (symbol->string cle)))))
+
+(define %utilisateur (machine 'utilisateur))
 (define %home (string-append "/home/" %utilisateur))
+
+;;; Pendant Emacs du profil machine.  init.el le charge au démarrage : la
+;;; diode du micro, décrite plus haut par une règle udev, et les réglages
+;;; d'écran n'ont ainsi qu'une seule source pour les deux moitiés du dépôt.
+
+(define %machine.el
+  (string-append
+   ";;; machine.el --- Profil machine  -*- lexical-binding: t; -*-\n"
+   ";;\n"
+   ";; Engendré par home.scm depuis machines/" (prive 'machine) ".scm.\n"
+   ";; Toute modification sera écrasée au prochain « guix home reconfigure ».\n"
+   "\n"
+   "(setq lateci-machine-nom \"" (machine 'nom-hote) "\")\n"
+   "(setq lateci-machine-diode-micmute \"/sys/class/leds/"
+   (machine 'diode-micmute) "/brightness\")\n"
+   "(setq lateci-machine-verrou-ecran \"" (machine 'verrou-ecran) "\")\n"
+   "(setq lateci-machine-police-taille "
+   (number->string (machine 'police-taille)) ")\n"
+   "(setq lateci-machine-seuil-division "
+   (number->string (machine 'seuil-division)) ")\n"
+   "\n;;; machine.el ends here\n"))
 
 (home-environment
  (packages
@@ -139,6 +175,11 @@
                    home-environment-variables-service-type
                    '(("PATH" . "$HOME/.local/bin:$PATH")))
 
+   (simple-service 'profil-machine
+                   home-files-service-type
+                   (list `(".local/share/lateci/machine.el"
+                           ,(plain-file "machine.el" %machine.el))))
+
    (simple-service 'x11-fichiers
                    home-files-service-type
                    (list
@@ -156,7 +197,9 @@
 		    `(".local/bin/suspend"
 		      ,(program-file "suspend-cmd"
 		                     #~(execl "/run/current-system/profile/bin/sh" "sh" "-c"
-		                              "DISPLAY=:0 nohup /run/setuid-programs/slock >/dev/null 2>&1 & sleep 2 ; echo mem | /run/setuid-programs/sudo /run/current-system/profile/bin/tee /sys/power/state > /dev/null")))
+		                              (string-append
+			               "DISPLAY=:0 nohup " #$(machine 'verrou-ecran)
+			               " >/dev/null 2>&1 & sleep 2 ; echo mem | /run/setuid-programs/sudo /run/current-system/profile/bin/tee /sys/power/state > /dev/null"))))
 		    
 		    `(".local/share/dbus-1/services/org.gnu.Emacs.FileChooser.service"
 		      ,(plain-file "emacs-filechooser-dbus"

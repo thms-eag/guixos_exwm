@@ -27,21 +27,38 @@
               " — copier prive.scm.exemple en prive.scm et y porter les"
               " valeurs réelles (lsblk -o NAME,MOUNTPOINT,UUID)"))))
 
+;;; Profil de la machine, désigné par prive.scm et décrit dans machines/.
+;;; Il rassemble ce qui varie d'une machine à l'autre sans être secret :
+;;; nom d'hôte, compte, locale, matériel.
+
+(define %machine
+  (let* ((ici (or (and=> (current-filename) dirname) "."))
+         (fichier (string-append ici "/machines/" (prive 'machine) ".scm")))
+    (if (file-exists? fichier)
+        (call-with-input-file fichier read)
+        (error (string-append "profil machine introuvable : " fichier)))))
+
+(define (machine cle)
+  "Valeur CLE du profil machine, ou erreur explicite si elle manque."
+  (or (assq-ref %machine cle)
+      (error (string-append "profil machine incomplet : "
+                            (symbol->string cle)))))
+
 (operating-system
- (locale "fr_FR.utf8")
- (timezone "Europe/Paris")
- (keyboard-layout (keyboard-layout "fr"))
- (host-name "lateci")
+ (locale (machine 'locale))
+ (timezone (machine 'fuseau))
+ (keyboard-layout (keyboard-layout (machine 'clavier)))
+ (host-name (machine 'nom-hote))
  (sudoers-file
   (plain-file "sudoers"
               "root ALL=(ALL) ALL\n%wheel ALL=(ALL) ALL\n%wheel ALL=(ALL) NOPASSWD: /run/current-system/profile/bin/herd power-off root, /run/current-system/profile/sbin/reboot, /run/current-system/profile/bin/tee /sys/power/state\n"))
  
  (users (cons* (user-account
-                (name "thomas_rm")
-                (comment "Thomas Rousseau-Millasseau")
+                (name (machine 'utilisateur))
+                (comment (machine 'nom-complet))
                 (group "users")
-                (home-directory "/home/thomas_rm")
-                (supplementary-groups '("wheel" "netdev" "audio" "video" "input" "tty")))
+                (home-directory (string-append "/home/" (machine 'utilisateur)))
+                (supplementary-groups (machine 'groupes)))
                %base-user-accounts))
 
  (packages (append (list
@@ -73,7 +90,7 @@
 			   (list (udev-rule
 				  "90-micmute.rules"
 				  (string-append
-				   "ACTION==\"add\", SUBSYSTEM==\"leds\", KERNEL==\"platform::micmute\", "
+				   "ACTION==\"add\", SUBSYSTEM==\"leds\", KERNEL==\"" (machine 'diode-micmute) "\", "
 				   "ATTR{trigger}=\"none\", "
 				   "RUN+=\"/run/current-system/profile/bin/chgrp input /sys/class/leds/%k/brightness\", "
 				   "RUN+=\"/run/current-system/profile/bin/chmod g+w /sys/class/leds/%k/brightness\""))))
@@ -87,18 +104,21 @@
 
 				 `("X11/xorg.conf.d/90-clavier.conf"
 				   ,(plain-file "90-clavier.conf"
-						"Section \"InputClass\"\nIdentifier \"clavier-all\"\nDriver \"libinput\"\nMatchIsKeyboard \"on\"\nOption \"XkbLayout\" \"fr\"\nEndSection\n")))))
+						(string-append
+							 "Section \"InputClass\"\nIdentifier \"clavier-all\"\nDriver \"libinput\"\nMatchIsKeyboard \"on\"\nOption \"XkbLayout\" \""
+							 (machine 'clavier)
+							 "\"\nEndSection\n"))))))
 	  %base-services))
 
 
  (bootloader (bootloader-configuration
               (bootloader grub-efi-bootloader)
-              (targets (list "/boot/efi"))
+              (targets (list (machine 'bootloader-cible)))
               (keyboard-layout keyboard-layout)))
  (swap-devices (list (swap-space
                       (target (uuid (prive 'uuid-swap))))))
  (file-systems (cons* (file-system
-		       (mount-point "/boot/efi")
+		       (mount-point (machine 'bootloader-cible))
 		       (device (uuid (prive 'uuid-efi) 'fat32))
 		       (type "vfat"))
                       (file-system

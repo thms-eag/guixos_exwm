@@ -1,7 +1,20 @@
 # Relevé des valeurs à extraire
 
-Inventaire préalable à la modularisation. Aucun code n'est modifié à ce stade :
-ce document sert à valider le découpage avant intervention.
+Inventaire préalable à la modularisation.
+
+**État d'avancement** — les étapes 1 à 3 du § 10 sont faites :
+
+| Étape | État | Où |
+|---|---|---|
+| 1. Sortir D1 du dépôt | ✅ | `prive.scm` / `~/.config/lateci/prive.el`, modèles `*.exemple` |
+| 2. Factoriser les modèles LaTeX | ✅ | section « Documents commerciaux » d'`init.el` |
+| 3. Profil machine Guix ↔ Emacs | ✅ | `machines/lateci.scm`, engendre `~/.local/share/lateci/machine.el` |
+| 4. Extraire D4 (`~/Bureau/`) | ⬜ | — |
+| 5. Extraire D3 (organisation) | ◐ | fait dans les modèles ; reste les requêtes notmuch |
+| 6. D5 en `defcustom` | ⬜ | — |
+
+Les références `fichier:ligne` ci-dessous datent du relevé initial et ont
+bougé dans `init.el` depuis.
 
 Périmètre scanné : `config.scm` (85 l.), `home.scm` (165 l.), `channels.scm`
 (11 l.), `early-init.el` (13 l.), `init.el` (3947 l.).
