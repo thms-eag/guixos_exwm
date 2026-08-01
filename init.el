@@ -876,6 +876,28 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
 ;; Position compacte avec pied-de-mouche
 (setq-default mode-line-position '("%p¶%l"))
 
+;;;;; Témoins colorés : couleur limitée à la fenêtre sélectionnée
+;; La modeline inactive est masquée par `usr-appliquer-faces' (texte et fond à la
+;; couleur du fond d'Emacs). Mais Emacs fusionne la face d'une chaîne de modeline
+;; PAR-DESSUS `mode-line-inactive' : tout segment posant un `:foreground' explicite
+;; — le « ● REC » de la note vocale, les faces `battery-load-low' et
+;; `battery-load-critical' de battery.el — écrase ce masquage et reste lisible sur
+;; les fenêtres non sélectionnées. `mode-line-window-selected-p' (Emacs 28+) permet
+;; de ne laisser les couleurs que sur la fenêtre courante.
+
+(defun usr--modeline-divers ()
+  "Rend `global-mode-string', sans couleurs hors fenêtre sélectionnée.
+Remplace le rendu par défaut de `mode-line-misc-info'."
+  (let ((rendu (format-mode-line '("" global-mode-string))))
+    (if (mode-line-window-selected-p)
+        rendu
+      ;; `propertize' renvoie une copie : les chaînes sources ne sont pas altérées.
+      ;; Seule la propriété `face' est écrasée — `help-echo' et les cartes de
+      ;; souris des segments sont conservés.
+      (propertize rendu 'face 'mode-line-inactive))))
+
+(setq-default mode-line-misc-info '((:eval (usr--modeline-divers))))
+
 ;;;;; Modeline unifiée (Réseau, SSH, Hydroxide, GPG, Syncthing) 
 (defvar usr--reseau-online nil)
 (defvar usr--gpg-unlocked nil)
