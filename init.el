@@ -2832,6 +2832,12 @@ monté un partage, sans attendre le prochain sondage périodique."
 
 ;;;; --- Touches directes -----------------------------------------------------
 
+(when (display-graphic-p)
+  (condition-case err
+      (call-process "setxkbmap" nil nil nil "-option" "caps:super")
+    (error (message "setxkbmap absent : VerrMaj non convertie en Super (%s)"
+                    (error-message-string err)))))
+
 (defun usr--lier-touche (touche commande)
   "Lie TOUCHE à COMMANDE pour EXWM sans interrompre le chargement en cas d'échec.
 Une touche absente du clavier est simplement ignorée."
@@ -2843,6 +2849,7 @@ Une touche absente du clavier est simplement ignorée."
 (defvar usr--touches-declarees
   '(;; --- La porte d'entrée unique ---
     ("s-SPC"     . usr-menu-ouvrir)
+    ("s-g"       . keyboard-quit)
 
     ;; --- Gestes réflexes ---
     ("s-<left>"   . windmove-left)
@@ -2851,8 +2858,8 @@ Une touche absente du clavier est simplement ignorée."
     ("s-<down>"   . windmove-down)
     ("s-<prior>"  . previous-buffer)
     ("s-<next>"   . next-buffer)
-    ("s-<tab>"    . delete-other-windows)
-    ("s-<return>" . split-window-right)
+    ("s-<return>"    . delete-other-windows)
+    ("s-<tab>" . split-window-right)
 
     ;; --- Touches dédiées du clavier ---
     ;; Son
@@ -2896,6 +2903,8 @@ Sert aussi de source à `usr-touches-materielles'.")
     (when (string-prefix-p "s-" (car paire))
       (ignore-errors
         (keymap-set exwm-mode-map (car paire) (cdr paire))))))
+
+(define-key key-translation-map (kbd "s-g") (kbd "C-g"))
 
 (defun usr-touches-verifier ()
   "Vérifie que chaque touche déclarée est bien vue par Emacs et par EXWM.
@@ -3042,6 +3051,7 @@ diverger de ce que les touches font réellement."
                 "Une seule porte d'entrée : =s-SPC= (=C-c SPC= en secours).\n\n"
                 "* Touches directes\n\n"
                 "  | s-SPC                | le menu                          |\n"
+		"  | s-g                  | annuler (vaut C-g)               |\n"
                 "  | s-<flèches>          | déplacement entre fenêtres       |\n"
                 "  | s-<tab>              | plein écran                      |\n"
                 "  | XF86Audio*           | volume, lecture                  |\n"
