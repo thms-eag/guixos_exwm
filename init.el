@@ -149,6 +149,16 @@
   (org-use-sub-superscripts "{}")
   (org-id-link-to-org-use-id t)
   (org-fold-catch-invisible-edits 'show)
+
+  ;; Les notes vocales pointent leur audio par un lien « file: ».  Sans cette
+  ;; association, un clic ouvrirait le fichier en binaire dans un tampon.
+  (org-file-apps
+   '((remote . emacs)
+     (auto-mode . emacs)
+     (directory . emacs)
+     ("\\.\\(wav\\|mp3\\|m4a\\|ogg\\|oga\\|opus\\|flac\\|aac\\|amr\\)\\'" . "mpv --really-quiet %s")
+     ("\\.x?html?\\'" . default)
+     ("\\.pdf\\'" . default)))
   
   ;; --- Exportation ---
   (org-export-with-drawers nil)
@@ -188,6 +198,15 @@
    '(("f" "Fleeting note" item (file+headline org-default-notes-file "Notes") "- %?")
      ("j" "Journal Interstitiel" entry (file denote-journal-path-to-new-or-existing-entry) "* %<%H:%M>\n** DONE %?\n** NEXT " :empty-lines 1)
      ("n" "Permanent note" plain (file denote-last-path) #'denote-org-capture :no-save t :immediate-finish nil :kill-buffer t :jump-to-captured t)
+
+     ;; Notes vocales : la cible enregistre (ou récupère l'enregistrement qui
+     ;; vient de s'achever), dépose l'audio dans le Bureau au format Denote et
+     ;; pose le squelette.  Voir la section NOTE VOCALE.
+     ("v" "Note vocale" plain (function usr--vocale-cible-note) "%?"
+      :empty-lines 0 :kill-buffer nil :jump-to-captured t)
+     ("V" "Note vocale brève" item (function usr--vocale-cible-notes)
+      "- %<%Y-%m-%d %H:%M> %(usr--vocale-lien-org) %?" :empty-lines 0)
+
      ("i" "NEXT" entry (file+headline org-default-notes-file "Tasks") "* NEXT %i%?")
      ("t" "TODO" entry (file+headline org-default-notes-file "Tasks") "* TODO %i%?")
      ("R" "RU" entry (file+headline org-default-notes-file "Tasks") "* RU %i%?")
@@ -1257,6 +1276,11 @@ délibérée, à lancer séparément."
 (setq denote-directory "~/Bureau/")
 (setq denote-dired-directories "~/Bureau/")
 (setq denote-journal-directories "~/Bureau/")
+;; La boîte de dépôt des notes vocales venues du téléphone vit dans le
+;; répertoire Denote : on l'écarte de tous les parcours de la base (recherche,
+;; statistiques, renommages en lot).  Le motif est comparé au nom du répertoire
+;; seul, d'où l'ancrage.
+(setq denote-excluded-directories-regexp "\\`\\.vocal_input\\'")
 
 (use-package denote
   :defer t
@@ -2372,41 +2396,854 @@ insérée au point plutôt qu'affichée."
     (message "Registre exporté : %s" destination)
     (find-file destination)))
 
-;;; NOTE VOCALE
+;;; NOTE VOCALE ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+;;
+;; Une note vocale est une note comme les autres : elle passe par org-capture,
+;; elle atterrit dans la base Denote du Bureau, elle se retrouve avec les mêmes
+;; outils.  L'audio est déposé à côté de la note, sous un nom Denote lui aussi.
+;;
+;;   XF86AudioMicMute   1re pression : enregistre (témoin ● REC en modeline).
+;;                      2e pression  : arrête et propose la destination.
+;;
+;; La transcription est toujours facultative et toujours asynchrone : la note
+;; est utilisable immédiatement, le texte s'y dépose plus tard, tout seul et
+;; sans voler le focus.  Deux moteurs au choix, whisper.cpp en local ou l'API
+;; OpenAI, et une boîte de dépôt pour les enregistrements venus du téléphone.
 
-(defvar usr--note-vocale-processus nil)
-(defvar usr--note-vocale-fichier "/tmp/note-vocale-test.wav")
+;;;; --- Réglages -------------------------------------------------------------
+
+(defvar usr-vocale-repertoire (expand-file-name "vocal/" user-emacs-directory)
+  "Répertoire de travail : enregistrements en cours et conversions.
+Délibérément hors de /tmp, qui est un tmpfs — donc de la mémoire vive.")
+
+(defvar usr-vocale-boite (expand-file-name ".vocal_input/" "~/Bureau/")
+  "Boîte de dépôt des enregistrements venus de l'extérieur (Syncthing).
+Ce qui s'y trouve est temporaire : une fois traité, l'audio est renommé au
+format Denote et déplacé dans le Bureau ; rien ne subsiste ici.")
+
+(defvar usr-vocale-extensions
+  '("wav" "m4a" "mp3" "opus" "ogg" "oga" "3gp" "3gpp" "amr" "aac" "flac" "mp4" "webm")
+  "Extensions reconnues comme des enregistrements audio.")
+
+(defvar usr-vocale-mot-cle "vocal"
+  "Mot-clé Denote apposé à toute note vocale.")
+
+(defvar usr-vocale-marqueur-attente "(transcription en cours…)"
+  "Texte déposé sous « * Transcription » tant que le résultat n'est pas là.")
+
+(defvar usr-transcription-moteur 'local
+  "Moteur de transcription : `local' (whisper.cpp) ou `api' (OpenAI).")
+
+(defvar usr-whisper-binaire nil
+  "Nom du binaire whisper.cpp.  Détecté automatiquement lorsqu'il vaut nil.")
+
+(defvar usr-whisper-modele (expand-file-name "~/.local/share/whisper/ggml-medium.bin")
+  "Poids whisper.cpp.  Absents de Guix : voir `usr-vocale-installer-modele'.")
+
+(defvar usr-whisper-langue "fr"
+  "Langue passée aux deux moteurs de transcription.")
+
+(defvar usr-transcription-modele-api "gpt-4o-transcribe"
+  "Modèle de l'endpoint /v1/audio/transcriptions.")
+
+(defvar usr-transcription-taille-max-api (* 25 1024 1024)
+  "Limite d'envoi de l'API OpenAI, en octets.")
+
+;;;; --- État et témoin de modeline -------------------------------------------
+
+(defvar usr--vocale-processus nil)
+(defvar usr--vocale-fichier nil)
+(defvar usr--vocale-debut nil)
+(defvar usr--vocale-horodatage nil)
+(defvar usr--vocale-suite nil)
+(defvar usr--vocale-minuteur nil)
+(defvar usr--vocale-taches 0 "Nombre de transcriptions en cours.")
+
+(defvar usr--vocale-en-attente nil
+  "(CHEMIN . DURÉE) du dernier enregistrement, en attente de rattachement.")
+
+(defvar usr--vocale-lien-courant nil
+  "Lien Org du dernier audio déposé, lu par le modèle de capture « V ».")
+
+(defvar usr--vocale-temoin "")
+;; Sans cette propriété, la modeline dépouille la chaîne de ses faces : le
+;; témoin d'enregistrement resterait gris au lieu de rouge.
+(put 'usr--vocale-temoin 'risky-local-variable t)
+
+(or global-mode-string (setq global-mode-string '("")))
+(unless (memq 'usr--vocale-temoin global-mode-string)
+  (setq global-mode-string (append global-mode-string '(usr--vocale-temoin))))
+
+(defun usr--vocale-temoin-poser (texte &optional face)
+  "Affiche TEXTE dans la modeline, ou l'efface lorsque TEXTE vaut nil."
+  (setq usr--vocale-temoin
+        (if texte
+            (propertize (format " %s " texte) 'face (or face 'mode-line-emphasis))
+          ""))
+  (force-mode-line-update t))
+
+(defun usr--vocale-duree-texte (secondes)
+  (let ((s (floor (or secondes 0))))
+    (format "%02d:%02d" (/ s 60) (% s 60))))
+
+(defun usr--vocale-en-cours-p ()
+  (process-live-p usr--vocale-processus))
+
+(defun usr--vocale-temoin-taches ()
+  "Repose le témoin sur l'état des transcriptions en cours."
+  (usr--vocale-temoin-poser
+   (when (> usr--vocale-taches 0)
+     (format "⋯ transcription (%d)" usr--vocale-taches))))
+
+(defun usr--vocale-temoin-rafraichir ()
+  (usr--vocale-temoin-poser
+   (format "● REC %s"
+           (usr--vocale-duree-texte
+            (float-time (time-subtract (current-time) usr--vocale-debut))))
+   '(:foreground "red" :weight bold)))
+
+(defun usr--vocale-tache-debut ()
+  (setq usr--vocale-taches (1+ usr--vocale-taches))
+  (unless (usr--vocale-en-cours-p) (usr--vocale-temoin-taches)))
+
+(defun usr--vocale-tache-fin ()
+  (setq usr--vocale-taches (max 0 (1- usr--vocale-taches)))
+  (unless (usr--vocale-en-cours-p) (usr--vocale-temoin-taches)))
+
+;;;; --- Enregistrement -------------------------------------------------------
+
+(defun usr--vocale-demarrer (&optional suite)
+  "Lance arecord.  SUITE, si elle est fournie, est appelée sans argument à
+l'arrêt, à la place du menu de destination."
+  (unless (executable-find "arecord")
+    (user-error "arecord est absent : installez alsa-utils"))
+  (make-directory usr-vocale-repertoire t)
+  (setq usr--vocale-horodatage (format-time-string "%Y%m%dT%H%M%S")
+        usr--vocale-debut (current-time)
+        usr--vocale-suite suite
+        usr--vocale-fichier (expand-file-name (concat usr--vocale-horodatage ".wav")
+                                              usr-vocale-repertoire))
+  (setq usr--vocale-processus
+        (make-process
+         :name "note-vocale"
+         :buffer " *note-vocale*"
+         :noquery t
+         ;; 16 kHz mono S16_LE : exactement le format d'entrée exigé par
+         ;; whisper.cpp, aucune conversion ne sera nécessaire ensuite.
+         :command (list "arecord" "-q" "-D" "default"
+                        "-f" "S16_LE" "-r" "16000" "-c" "1" "-t" "wav"
+                        usr--vocale-fichier)
+         :sentinel #'usr--vocale-sentinelle))
+  (when usr--vocale-minuteur (cancel-timer usr--vocale-minuteur))
+  (setq usr--vocale-minuteur (run-with-timer 0 1 #'usr--vocale-temoin-rafraichir))
+  (message "Enregistrement en cours — même touche pour arrêter."))
+
+(defun usr--vocale-arreter ()
+  ;; SIGINT et jamais SIGKILL : arecord doit pouvoir réécrire l'en-tête WAV
+  ;; avec la taille réelle, faute de quoi le fichier est illisible.
+  (when (usr--vocale-en-cours-p)
+    (interrupt-process usr--vocale-processus)))
+
+(defun usr--vocale-sentinelle (proc _evenement)
+  (when (memq (process-status proc) '(exit signal))
+    (when usr--vocale-minuteur
+      (cancel-timer usr--vocale-minuteur)
+      (setq usr--vocale-minuteur nil))
+    (setq usr--vocale-processus nil)
+    (usr--vocale-temoin-taches)
+    (let ((fichier usr--vocale-fichier)
+          (suite usr--vocale-suite))
+      (setq usr--vocale-suite nil)
+      ;; Arrêté par SIGINT, arecord sort en « signal » : son code de sortie ne
+      ;; dit rien du succès.  Seul le fichier fait foi — 44 octets, c'est
+      ;; l'en-tête WAV tout seul, donc rien d'enregistré.
+      (if (and fichier
+               (file-exists-p fichier)
+               (> (file-attribute-size (file-attributes fichier)) 44))
+          (progn
+            (setq usr--vocale-en-attente
+                  (cons fichier
+                        (float-time (time-subtract (current-time) usr--vocale-debut))))
+            ;; On ne dialogue jamais depuis une sentinelle : elle s'exécute à un
+            ;; point arbitraire du programme, potentiellement au milieu d'une
+            ;; autre commande.
+            (run-at-time 0 nil (or suite #'usr--vocale-proposer-destination)))
+        (when (and fichier (file-exists-p fichier)) (delete-file fichier))
+        (setq usr--vocale-en-attente nil)
+        (message "Échec de l'enregistrement vocal.")))))
 
 (defun usr-note-vocale ()
-  "Démarre ou arrête un enregistrement vocal avec arecord."
+  "Démarre ou arrête une note vocale.
+À l'arrêt, propose de la rattacher à une note."
   (interactive)
-  (if (process-live-p usr--note-vocale-processus)
-      (progn
-        (interrupt-process usr--note-vocale-processus)
-        (message "Arrêt de l’enregistrement…"))
-    (setq usr--note-vocale-processus
-          (make-process
-           :name "note-vocale"
-           :buffer "*note-vocale-arecord*"
-           :command
-           (list "arecord"
-                 "-D" "default"
-                 "-f" "S16_LE"
-                 "-r" "16000"
-                 "-c" "1"
-                 "-t" "wav"
-                 usr--note-vocale-fichier)
-           :noquery t
-           :sentinel
-           (lambda (process _event)
-             (when (memq (process-status process) '(exit signal))
-               (when (eq process usr--note-vocale-processus)
-                 (setq usr--note-vocale-processus nil))
-               (if (file-exists-p usr--note-vocale-fichier)
-                   (message "Note vocale enregistrée : %s"
-                            usr--note-vocale-fichier)
-                 (message "Échec de l’enregistrement vocal."))))))
-    (message "Enregistrement vocal démarré.")))
+  (if (usr--vocale-en-cours-p)
+      (usr--vocale-arreter)
+    (usr--vocale-demarrer)))
+
+(defun usr--vocale-proposer-destination ()
+  "Demande ce qu'il faut faire de l'enregistrement qui vient de s'achever.
+La réécoute ne referme pas l'invite : on peut vérifier avant de choisir."
+  (catch 'fini
+    (while t
+      (let ((choix (read-char-choice
+                    (format "Note vocale (%s) : [v] note Denote  [V] note brève  [e] réécouter  [g] audio seul  [s] supprimer "
+                            (usr--vocale-duree-texte (cdr usr--vocale-en-attente)))
+                    '(?v ?V ?e ?g ?s))))
+        (pcase choix
+          (?e (usr-vocale-ecouter))
+          (?v (org-capture nil "v") (throw 'fini t))
+          (?V (org-capture nil "V") (throw 'fini t))
+          (?g (usr-vocale-garder-audio) (throw 'fini t))
+          (?s (usr-vocale-supprimer) (throw 'fini t)))))))
+
+;;;; --- Nommage et dépôt de l'audio ------------------------------------------
+
+(defun usr--vocale-slug (texte)
+  "Réduit TEXTE à un fragment de nom de fichier, à la manière de Denote."
+  (replace-regexp-in-string
+   "^-\\|-$" ""
+   (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase (or texte "")))))
+
+(defun usr--vocale-bureau ()
+  (if (fboundp 'denote-directory)
+      (denote-directory)
+    (expand-file-name "~/Bureau/")))
+
+(defun usr--vocale-nom-denote (horodatage titre mots extension)
+  (format "%s--%s__%s.%s"
+          horodatage
+          (usr--vocale-slug titre)
+          (mapconcat #'usr--vocale-slug
+                     (seq-uniq (cons usr-vocale-mot-cle mots))
+                     "_")
+          extension))
+
+(defun usr--vocale-deposer-audio (source titre mots &optional temps)
+  "Déplace SOURCE dans le Bureau sous un nom conforme à Denote.
+TEMPS fixe l'identifiant ; à défaut, la date de modification de SOURCE — ce
+qui, pour un fichier venu du téléphone, est bien l'instant de l'enregistrement.
+Renvoie le chemin de destination."
+  (let* ((temps (or temps (file-attribute-modification-time (file-attributes source))))
+         (extension (or (file-name-extension source) "wav"))
+         (decalage 0)
+         cible)
+    ;; Collision d'identifiant (deux dépôts dans la même seconde) : on décale.
+    (while (progn
+             (setq cible (expand-file-name
+                          (usr--vocale-nom-denote
+                           (format-time-string "%Y%m%dT%H%M%S"
+                                               (time-add temps decalage))
+                           titre mots extension)
+                          (usr--vocale-bureau)))
+             (and (file-exists-p cible) (< decalage 60)))
+      (setq decalage (1+ decalage)))
+    (rename-file source cible)
+    cible))
+
+(defun usr--vocale-duree-fichier (fichier)
+  "Durée de FICHIER en secondes via ffprobe, ou nil."
+  (when (executable-find "ffprobe")
+    (with-temp-buffer
+      (when (zerop (call-process "ffprobe" nil t nil
+                                 "-v" "error"
+                                 "-show_entries" "format=duration"
+                                 "-of" "default=noprint_wrappers=1:nokey=1"
+                                 fichier))
+        (ignore-errors (string-to-number (string-trim (buffer-string))))))))
+
+;;;; --- Squelette de la note -------------------------------------------------
+
+(defun usr--vocale-moteur-texte ()
+  (pcase usr-transcription-moteur
+    ('local (format "whisper.cpp (%s)" (file-name-base usr-whisper-modele)))
+    ('api (format "API OpenAI (%s)" usr-transcription-modele-api))
+    (_ "—")))
+
+(defun usr--vocale-lien (audio &optional etiquette)
+  ;; Lien « file: » et non « denote: » : le premier passe par org-file-apps et
+  ;; donc par un lecteur audio, le second ferait un find-file qui ouvrirait le
+  ;; WAV en binaire dans Emacs.
+  (format "[[file:%s][%s]]"
+          (file-name-nondirectory audio)
+          (or etiquette (file-name-nondirectory audio))))
+
+(defun usr--vocale-squelette (audio duree)
+  (format "* Audio
+:PROPERTIES:
+:AUDIO: %s
+:END:
+- Fichier : %s
+- Durée : %s
+- Enregistré le : %s
+- Moteur : %s
+
+* Transcription
+
+%s
+
+* Notes
+
+"
+          (file-name-base audio)
+          (usr--vocale-lien audio (format "🎙 %s" (usr--vocale-duree-texte duree)))
+          (usr--vocale-duree-texte duree)
+          (format-time-string "%Y-%m-%d %a %H:%M")
+          (usr--vocale-moteur-texte)
+          usr-vocale-marqueur-attente))
+
+;;;; --- Moteurs de transcription ---------------------------------------------
+
+(defun usr--whisper-binaire ()
+  "Localise le binaire whisper.cpp.
+Le projet amont a renommé « main » en « whisper-cli » ; selon le commit du
+canal Guix, l'un ou l'autre peut être exposé, on essaie donc les deux."
+  (or (and usr-whisper-binaire (executable-find usr-whisper-binaire))
+      (seq-some #'executable-find '("whisper-cli" "whisper-cpp" "whisper" "main"))))
+
+(defun usr--transcription-obstacle ()
+  "Raison pour laquelle la transcription est impossible, ou nil."
+  (pcase usr-transcription-moteur
+    ('local (cond ((null (usr--whisper-binaire)) "whisper.cpp est absent")
+                  ((not (file-exists-p usr-whisper-modele))
+                   "le modèle est absent (M-x usr-vocale-installer-modele)")))
+    ('api (unless (executable-find "curl") "curl est absent"))
+    (_ "moteur de transcription inconnu")))
+
+(defun usr--vocale-notre-enregistrement-p (fichier)
+  "FICHIER sort-il de notre propre enregistreur ?
+Auquel cas il est déjà en WAV 16 kHz mono et ne demande aucune conversion."
+  (string-prefix-p (file-name-as-directory (expand-file-name usr-vocale-repertoire))
+                   (expand-file-name fichier)))
+
+(defvar usr-vocale-extensions-api
+  '("mp3" "mp4" "mpeg" "mpga" "m4a" "wav" "webm")
+  "Formats acceptés en l'état par l'API OpenAI.
+Tout le reste — .opus, .ogg, .amr, .3gp, courants sur les téléphones — doit
+être converti au préalable.")
+
+(defun usr--vocale-conversion-requise-p (fichier)
+  (pcase usr-transcription-moteur
+    ;; whisper.cpp n'accepte que du WAV 16 kHz mono : tout le reste y passe.
+    ('local (not (usr--vocale-notre-enregistrement-p fichier)))
+    ;; L'API accepte la plupart des formats du téléphone en l'état.  Restent
+    ;; deux motifs de conversion : un format qu'elle ignore, et la taille — un
+    ;; WAV 16 kHz atteint la limite de 25 Mo en une quinzaine de minutes.
+    ('api (or (not (member (downcase (or (file-name-extension fichier) ""))
+                           usr-vocale-extensions-api))
+              (> (file-attribute-size (file-attributes fichier)) (* 20 1024 1024))))
+    (_ nil)))
+
+(defun usr--vocale-preparer (fichier rappel)
+  "Prépare FICHIER pour le moteur courant, puis appelle (RAPPEL CHEMIN ERREUR).
+CHEMIN vaut FICHIER lorsqu'aucune conversion n'est nécessaire ; sinon c'est un
+fichier temporaire, que l'appelant se charge de supprimer."
+  (if (not (usr--vocale-conversion-requise-p fichier))
+      (funcall rappel fichier nil)
+    (if (not (executable-find "ffmpeg"))
+        (funcall rappel nil "ffmpeg est absent, conversion impossible")
+      (make-directory usr-vocale-repertoire t)
+      (let* ((api (eq usr-transcription-moteur 'api))
+             (sortie (expand-file-name
+                      (format "%s-prep.%s" (file-name-base fichier) (if api "mp3" "wav"))
+                      usr-vocale-repertoire))
+             ;; -nostdin est indispensable sous make-process : sans lui, ffmpeg
+             ;; consomme l'entrée standard et reste en attente.
+             (commande (append
+                        (list "ffmpeg" "-nostdin" "-y" "-loglevel" "error"
+                              "-i" fichier "-vn" "-ac" "1" "-ar" "16000")
+                        (if api
+                            ;; MP3 mono 32 kb/s : une heure de parole ≈ 14 Mo,
+                            ;; donc sous la limite, et c'est un format que
+                            ;; l'API accepte à coup sûr.
+                            (list "-c:a" "libmp3lame" "-b:a" "32k")
+                          ;; whisper.cpp : WAV 16 kHz mono 16 bits, rien d'autre.
+                          (list "-c:a" "pcm_s16le"))
+                        (list sortie))))
+        (make-process
+         :name "ffmpeg-vocale" :buffer " *ffmpeg-vocale*" :noquery t
+         :command commande
+         :sentinel
+         (lambda (proc _evenement)
+           (when (memq (process-status proc) '(exit signal))
+             (if (and (zerop (process-exit-status proc)) (file-exists-p sortie))
+                 (funcall rappel sortie nil)
+               (funcall rappel nil "échec de la conversion ffmpeg")))))))))
+
+(defun usr--transcrire-local (fichier rappel)
+  (let* ((base (expand-file-name (format "%s-%d" (file-name-base fichier) (random 100000))
+                                 usr-vocale-repertoire))
+         (sortie (concat base ".txt")))
+    (make-process
+     :name "whisper" :buffer " *whisper*" :noquery t
+     ;; -of attend un chemin SANS extension : whisper.cpp ajoute « .txt ».
+     ;; -nt supprime les horodatages, qui n'ont rien à faire dans une note.
+     :command (list (usr--whisper-binaire)
+                    "-m" (expand-file-name usr-whisper-modele)
+                    "-l" usr-whisper-langue
+                    "-nt"
+                    "-t" (number-to-string (max 1 (1- (num-processors))))
+                    "-otxt" "-of" base
+                    "-f" fichier)
+     :sentinel
+     (lambda (proc _evenement)
+       (when (memq (process-status proc) '(exit signal))
+         (let ((texte (when (file-exists-p sortie)
+                        (with-temp-buffer
+                          (insert-file-contents sortie)
+                          (string-trim (buffer-string))))))
+           (when (file-exists-p sortie) (delete-file sortie))
+           (if (and texte (not (string-empty-p texte)))
+               (funcall rappel texte nil)
+             (funcall rappel nil "whisper.cpp n'a rien produit"))))))))
+
+(defun usr--transcrire-api (fichier rappel)
+  (let ((taille (file-attribute-size (file-attributes fichier))))
+    (if (> taille usr-transcription-taille-max-api)
+        (funcall rappel nil (format "fichier trop volumineux (%.1f Mo, limite 25 Mo)"
+                                    (/ taille 1048576.0)))
+      (let ((proc
+             (make-process
+              :name "transcription-api"
+              :buffer (generate-new-buffer " *transcription-api*")
+              :noquery t
+              :connection-type 'pipe
+              ;; « -H @- » lit les en-têtes sur l'entrée standard : la clé ne
+              ;; transite donc jamais par argv, où n'importe quel « ps » de la
+              ;; machine pourrait la lire.  --fail-with-body conserve le corps
+              ;; JSON en cas d'erreur, sans quoi on n'aurait qu'un code muet.
+              :command (list "curl" "-sS" "--fail-with-body"
+                             "-H" "@-"
+                             "-F" (concat "file=@" fichier)
+                             "-F" (concat "model=" usr-transcription-modele-api)
+                             "-F" (concat "language=" usr-whisper-langue)
+                             "-F" "response_format=text"
+                             "https://api.openai.com/v1/audio/transcriptions")
+              :sentinel
+              (lambda (proc _evenement)
+                (when (memq (process-status proc) '(exit signal))
+                  (let ((sortie (with-current-buffer (process-buffer proc)
+                                  (string-trim (buffer-string)))))
+                    (kill-buffer (process-buffer proc))
+                    (if (zerop (process-exit-status proc))
+                        (funcall rappel sortie nil)
+                      (funcall rappel nil (if (string-empty-p sortie)
+                                              "échec de l'appel à l'API"
+                                            sortie)))))))))
+        (process-send-string proc (format "Authorization: Bearer %s\n" (usr--cle-openai)))
+        (process-send-eof proc)))))
+
+(defun usr--transcrire (fichier rappel)
+  "Transcrit FICHIER puis appelle (RAPPEL TEXTE ERREUR), hors sentinelle."
+  (let ((enveloppe (lambda (texte erreur) (run-at-time 0 nil rappel texte erreur))))
+    (usr--vocale-preparer
+     fichier
+     (lambda (prepare erreur)
+       (if erreur
+           (funcall enveloppe nil erreur)
+         (let ((fin (lambda (texte err)
+                      (unless (equal prepare fichier)
+                        (when (file-exists-p prepare) (delete-file prepare)))
+                      (funcall enveloppe texte err))))
+           (pcase usr-transcription-moteur
+             ('local (usr--transcrire-local prepare fin))
+             ('api (usr--transcrire-api prepare fin))
+             (_ (funcall fin nil "moteur de transcription inconnu")))))))))
+
+;;;; --- Dépôt différé de la transcription ------------------------------------
+
+(defun usr--vocale-fichier-cible (cible)
+  (let ((fichier (plist-get cible :fichier))
+        (id (plist-get cible :id)))
+    (cond ((and fichier (file-exists-p fichier)) fichier)
+          ;; La note a pu être renommée entre-temps ; son identifiant Denote,
+          ;; lui, ne bouge pas.
+          ((and id (fboundp 'denote-get-path-by-id)) (denote-get-path-by-id id)))))
+
+(defun usr--vocale-inserer (texte type ancre)
+  "Insère TEXTE dans le tampon courant.  Renvoie non-nil en cas de succès."
+  (goto-char (point-min))
+  (pcase type
+    ('note
+     ;; Le squelette est de notre fabrication : une recherche d'en-tête suffit,
+     ;; et coûte infiniment moins qu'une analyse org-element du tampon entier.
+     (when (re-search-forward "^\\* Transcription[ \t]*$" nil t)
+       (forward-line 1)
+       (let ((fin (save-excursion
+                    (if (re-search-forward "^\\* " nil t)
+                        (match-beginning 0)
+                      (point-max)))))
+         (delete-region (point) fin))
+       (insert "\n" (string-trim texte) "\n\n")
+       t))
+    ('item
+     ;; L'ancre est le nom de base du fichier audio : il figure littéralement
+     ;; dans le lien de l'item et survit donc à son déplacement dans le fichier.
+     (when (and ancre (search-forward ancre nil t))
+       (end-of-line)
+       (let ((marge (make-string 4 ?\s)))
+         (insert "\n" marge
+                 (string-replace "\n" (concat "\n" marge) (string-trim texte))))
+       t))))
+
+(defun usr--vocale-secours (cible texte)
+  "Écrit TEXTE à part : la transcription n'est jamais perdue silencieusement."
+  (make-directory usr-vocale-repertoire t)
+  (let ((secours (expand-file-name
+                  (format "%s-transcription.txt"
+                          (or (plist-get cible :ancre) "orpheline"))
+                  usr-vocale-repertoire)))
+    (with-temp-file secours (insert texte))
+    (message "Note introuvable — transcription écrite dans %s"
+             (abbreviate-file-name secours))))
+
+(defun usr--vocale-deposer-transcription (cible texte &optional essai)
+  "Dépose TEXTE dans la note désignée par CIBLE, sans voler le focus."
+  (let ((fichier (usr--vocale-fichier-cible cible))
+        (essai (or essai 0)))
+    (if (null fichier)
+        (usr--vocale-secours cible texte)
+      (let* ((deja (find-buffer-visiting fichier))
+             ;; find-file-noselect et jamais find-file : ni fenêtre ni tampon
+             ;; courant ne changent, l'utilisateur continue de travailler
+             ;; pendant que la note se complète sous lui.
+             (tampon (or deja (find-file-noselect fichier t)))
+             (pose nil))
+        (with-current-buffer tampon
+          (save-excursion
+            (save-restriction
+              (widen)
+              (setq pose (usr--vocale-inserer texte
+                                              (plist-get cible :type)
+                                              (plist-get cible :ancre)))
+              (when pose (let ((save-silently t)) (save-buffer))))))
+        ;; On ne tue que les tampons que nous avons nous-mêmes ouverts.
+        (unless deja (kill-buffer tampon))
+        (cond
+         (pose t)
+         ;; La capture n'est peut-être pas encore finalisée : on réessaie.
+         ((< essai 6)
+          (run-at-time 5 nil #'usr--vocale-deposer-transcription
+                       cible texte (1+ essai)))
+         (t (usr--vocale-secours cible texte)))))))
+
+(defun usr--vocale-transcrire-vers (audio cible)
+  "Propose de transcrire AUDIO et de déposer le résultat dans CIBLE."
+  (let ((obstacle (usr--transcription-obstacle)))
+    (cond
+     (obstacle
+      (usr--vocale-deposer-transcription
+       cible (format "(transcription indisponible : %s)" obstacle)))
+     ((not (y-or-n-p "Transcrire cet enregistrement en arrière-plan ? "))
+      (usr--vocale-deposer-transcription cible "(pas de transcription)"))
+     (t
+      (usr--vocale-tache-debut)
+      (usr--transcrire
+       audio
+       (lambda (texte erreur)
+         (usr--vocale-tache-fin)
+         (usr--vocale-deposer-transcription
+          cible (or texte (format "(échec de la transcription : %s)" erreur)))
+         (message (if texte
+                      "Transcription déposée."
+                    (format "Transcription en échec : %s" erreur)))))))))
+
+;;;; --- Cibles de capture ----------------------------------------------------
+
+(defun usr--vocale-attendre-fichier ()
+  (let ((tours 0))
+    (while (and (null usr--vocale-en-attente) (< tours 200))
+      (accept-process-output nil 0.05)
+      (setq tours (1+ tours))))
+  (unless usr--vocale-en-attente
+    (user-error "L'enregistrement n'a pas pu être finalisé")))
+
+(defun usr--vocale-assurer-enregistrement ()
+  "Garantit qu'un enregistrement terminé attend d'être rattaché."
+  (cond
+   (usr--vocale-en-attente)
+   ((usr--vocale-en-cours-p)
+    (usr--vocale-arreter)
+    (usr--vocale-attendre-fichier))
+   (t
+    ;; org-capture appelé sans enregistrement préalable : on enregistre ici.
+    ;; C'est le seul chemin synchrone du dispositif ; la touche micro y met fin
+    ;; aussi bien que n'importe quelle autre.
+    (usr--vocale-demarrer #'ignore)
+    (unwind-protect
+        (read-event (propertize " ● Enregistrement — une touche pour arrêter… "
+                                'face '(:foreground "red" :weight bold)))
+      (usr--vocale-arreter))
+    (usr--vocale-attendre-fichier))))
+
+(defun usr--vocale-lire-mots-cles ()
+  "Demande les mots-clés de la note, `usr-vocale-mot-cle' déjà en place."
+  (seq-uniq
+   (cons usr-vocale-mot-cle
+         (completing-read-multiple "Mots-clés : "
+                                   (ignore-errors (denote-keywords))
+                                   nil nil
+                                   (concat usr-vocale-mot-cle ",")))))
+
+(defun usr--vocale-cible-note ()
+  "Cible du modèle de capture « v » : crée la note Denote et son squelette."
+  (usr--vocale-assurer-enregistrement)
+  (let* ((paire usr--vocale-en-attente)
+         (source (car paire))
+         (duree (cdr paire))
+         (titre (read-string "Titre de la note vocale : "))
+         (mots (usr--vocale-lire-mots-cles))
+         (audio (usr--vocale-deposer-audio source titre mots)))
+    (setq usr--vocale-en-attente nil)
+    ;; Même idiome que usr-flux-capturer : denote visite le nouveau tampon,
+    ;; on y écrit à la suite.
+    (denote titre mots 'org)
+    (goto-char (point-max))
+    (insert (usr--vocale-squelette audio duree))
+    ;; La note doit exister sur le disque tout de suite : la transcription
+    ;; arrive plus tard et doit pouvoir la retrouver, tampon tué ou non.
+    (save-buffer)
+    (usr--vocale-transcrire-vers
+     audio (list :type 'note
+                 :fichier (buffer-file-name)
+                 :ancre (file-name-base audio)
+                 :id (and (fboundp 'denote-retrieve-filename-identifier)
+                          (denote-retrieve-filename-identifier (buffer-file-name)))))
+    (goto-char (point-max))))
+
+(defun usr--vocale-lien-org ()
+  "Lien Org du dernier audio déposé, pour le modèle de capture « V »."
+  (or usr--vocale-lien-courant ""))
+
+(defun usr--vocale-cible-notes ()
+  "Cible du modèle de capture « V » : fin de la rubrique « Notes »."
+  (usr--vocale-assurer-enregistrement)
+  (let* ((paire usr--vocale-en-attente)
+         (source (car paire))
+         (duree (cdr paire))
+         (audio (usr--vocale-deposer-audio source "note-vocale"
+                                           (list usr-vocale-mot-cle)))
+         (fichier (expand-file-name org-default-notes-file)))
+    (setq usr--vocale-en-attente nil
+          usr--vocale-lien-courant
+          (usr--vocale-lien audio (format "🎙 %s" (usr--vocale-duree-texte duree))))
+    (set-buffer (find-file-noselect fichier))
+    (widen)
+    (goto-char (point-min))
+    (unless (re-search-forward "^\\*+[ \t]+Notes[ \t]*$" nil t)
+      (goto-char (point-max))
+      (insert "\n* Notes\n"))
+    (org-back-to-heading t)
+    (org-end-of-subtree t t)
+    (usr--vocale-transcrire-vers
+     audio (list :type 'item :fichier fichier :ancre (file-name-base audio)))))
+
+;;;; --- Commandes ------------------------------------------------------------
+
+(defun usr--vocale-afficher-texte (texte &optional titre)
+  "Affiche TEXTE dans le tampon *transcription* et renvoie ce tampon."
+  (let ((tampon (get-buffer-create "*transcription*")))
+    (with-current-buffer tampon
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (org-mode)
+        (when titre (insert titre "\n\n"))
+        (insert texte "\n")
+        (goto-char (point-min)))
+      (setq buffer-read-only t))
+    (display-buffer tampon)
+    tampon))
+
+(defun usr-vocale-ecouter ()
+  "Réécoute l'enregistrement en attente de rattachement."
+  (interactive)
+  (if (null usr--vocale-en-attente)
+      (message "Aucun enregistrement en attente.")
+    (let ((fichier (car usr--vocale-en-attente)))
+      (cond ((fboundp 'emms-play-file) (emms-play-file fichier))
+            ((executable-find "mpv")
+             (start-process "mpv-vocale" nil "mpv" "--really-quiet" fichier))
+            (t (message "Aucun lecteur audio disponible."))))))
+
+(defun usr-vocale-garder-audio ()
+  "Dépose l'enregistrement en attente dans le Bureau, sans créer de note."
+  (interactive)
+  (if (null usr--vocale-en-attente)
+      (message "Aucun enregistrement en attente.")
+    (let ((audio (usr--vocale-deposer-audio (car usr--vocale-en-attente)
+                                            "note-vocale"
+                                            (list usr-vocale-mot-cle))))
+      (setq usr--vocale-en-attente nil)
+      (message "Audio conservé : %s" (file-name-nondirectory audio)))))
+
+(defun usr-vocale-supprimer ()
+  "Supprime l'enregistrement en attente."
+  (interactive)
+  (if (null usr--vocale-en-attente)
+      (message "Aucun enregistrement en attente.")
+    (delete-file (car usr--vocale-en-attente))
+    (setq usr--vocale-en-attente nil)
+    (message "Enregistrement supprimé.")))
+
+(defun usr-transcription-basculer ()
+  "Alterne entre le moteur local (whisper.cpp) et l'API OpenAI."
+  (interactive)
+  (setq usr-transcription-moteur
+        (if (eq usr-transcription-moteur 'local) 'api 'local))
+  (message "Moteur de transcription : %s" (usr--vocale-moteur-texte)))
+
+(defun usr--vocale-desc-moteur ()
+  (format "moteur        : %s" (usr--vocale-moteur-texte)))
+
+(defun usr-transcrire-fichier (fichier)
+  "Transcrit FICHIER et affiche le texte, sans créer de note."
+  (interactive
+   (list (read-file-name "Fichier audio : " (usr--vocale-bureau) nil t)))
+  (let ((obstacle (usr--transcription-obstacle)))
+    (when obstacle
+      (user-error "Transcription impossible : %s" obstacle))
+    (usr--vocale-tache-debut)
+    (usr--start-spinner (format "Transcription de %s" (file-name-nondirectory fichier)))
+    (usr--transcrire
+     fichier
+     (lambda (texte erreur)
+       (usr--vocale-tache-fin)
+       (if texte
+           (progn (usr--stop-spinner "Transcription terminée.")
+                  (usr--vocale-afficher-texte texte))
+         (usr--stop-spinner (format "Échec de la transcription : %s" erreur)))))))
+
+(defun usr-vocale-installer-modele ()
+  "Télécharge les poids whisper.cpp (~1,5 Go) : Guix ne les fournit pas."
+  (interactive)
+  (unless (executable-find "curl")
+    (user-error "curl est absent"))
+  (when (or (not (file-exists-p usr-whisper-modele))
+            (yes-or-no-p "Le modèle est déjà présent.  Le retélécharger ? "))
+    (make-directory (file-name-directory usr-whisper-modele) t)
+    (usr--start-spinner "Téléchargement du modèle whisper (~1,5 Go)")
+    (set-process-sentinel
+     (make-process
+      :name "whisper-modele" :buffer " *whisper-modele*" :noquery t
+      ;; ggml-medium.bin, et surtout pas ggml-medium.en.bin : la variante
+      ;; « .en » ne connaît que l'anglais et produirait du charabia.
+      :command (list "curl" "-fL" "--create-dirs"
+                     "-o" (expand-file-name usr-whisper-modele)
+                     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin"))
+     (lambda (proc _evenement)
+       (when (memq (process-status proc) '(exit signal))
+         (usr--stop-spinner
+          (if (zerop (process-exit-status proc))
+              "Modèle whisper installé."
+            "Échec du téléchargement du modèle.")))))))
+
+;;;; --- Boîte vocale externe -------------------------------------------------
+
+(defvar usr--boite-echecs nil)
+(defvar usr--boite-reussites 0)
+
+(defun usr--boite-lister ()
+  "Enregistrements prêts à être traités dans `usr-vocale-boite'."
+  (let ((maintenant (current-time)))
+    (sort
+     (seq-filter
+      (lambda (fichier)
+        (and (file-regular-p fichier)
+             (member (downcase (or (file-name-extension fichier) ""))
+                     usr-vocale-extensions)
+             (not (string-prefix-p "~syncthing~" (file-name-nondirectory fichier)))
+             ;; On laisse passer trente secondes : un transfert Syncthing peut
+             ;; être encore en cours sur ce fichier.
+             (> (float-time
+                 (time-subtract maintenant
+                                (file-attribute-modification-time
+                                 (file-attributes fichier))))
+                30)))
+      (directory-files usr-vocale-boite t "\\`[^.]"))
+     #'string<)))
+
+(defun usr-boite-vocale-traiter ()
+  "Traite un à un les enregistrements déposés dans la boîte vocale.
+Chaque fichier est transcrit, puis titré et tagué par vos soins, puis déplacé
+dans le Bureau au format Denote : la boîte se vide au fur et à mesure."
+  (interactive)
+  (make-directory usr-vocale-boite t)
+  (let ((fichiers (usr--boite-lister)))
+    (if (null fichiers)
+        (message "Boîte vocale vide (%s)." (abbreviate-file-name usr-vocale-boite))
+      (setq usr--boite-echecs nil
+            usr--boite-reussites 0)
+      (usr--boite-suivant fichiers))))
+
+(defun usr--boite-suivant (restants)
+  (if (null restants)
+      (message "Boîte vocale : %d note(s) créée(s), %d échec(s)%s"
+               usr--boite-reussites (length usr--boite-echecs)
+               (if usr--boite-echecs
+                   (format " — %s" (mapconcat #'file-name-nondirectory
+                                              (reverse usr--boite-echecs) ", "))
+                 ""))
+    (let ((fichier (car restants))
+          (suite (cdr restants)))
+      (usr--vocale-tache-debut)
+      (usr--start-spinner (format "Transcription de %s"
+                                  (file-name-nondirectory fichier)))
+      (usr--transcrire
+       fichier
+       (lambda (texte erreur)
+         (usr--vocale-tache-fin)
+         (usr--stop-spinner
+          (if texte
+              "Transcription terminée."
+            (format "Transcription en échec : %s" erreur)))
+         ;; Sans transcription, on demande : le fichier est peut-être corrompu,
+         ;; auquel cas il doit rester dans la boîte pour être examiné.
+         (if (or texte
+                 (yes-or-no-p
+                  (format "Pas de transcription pour %s.  Créer la note quand même ? "
+                          (file-name-nondirectory fichier))))
+             (condition-case err
+                 (usr--boite-finaliser fichier texte)
+               (error
+                (push fichier usr--boite-echecs)
+                (message "Échec sur %s : %s"
+                         (file-name-nondirectory fichier)
+                         (error-message-string err))))
+           (push fichier usr--boite-echecs))
+         (usr--boite-suivant suite))))))
+
+(defun usr--boite-finaliser (fichier texte)
+  "Crée la note Denote de FICHIER puis sort l'audio de la boîte."
+  (let ((apercu (usr--vocale-afficher-texte
+                 (or texte "(transcription indisponible)")
+                 (format "#+TITLE: %s" (file-name-nondirectory fichier)))))
+    (unwind-protect
+        (let* ((titre (read-string "Titre : " (usr--vocale-titre-suggere texte)))
+               (mots (usr--vocale-lire-mots-cles))
+               ;; L'horodatage vient de la date du fichier — l'instant de
+               ;; l'enregistrement sur le téléphone — et non de maintenant :
+               ;; la chronologie de la base Denote reste juste.
+               (temps (file-attribute-modification-time (file-attributes fichier)))
+               (duree (usr--vocale-duree-fichier fichier))
+               ;; Le déplacement vient en dernier : si quoi que ce soit échoue
+               ;; avant, le fichier est resté intact dans la boîte et sera
+               ;; repris au prochain passage.  L'audio n'est jamais perdu.
+               (audio (usr--vocale-deposer-audio fichier titre mots temps)))
+          (denote titre mots 'org)
+          (goto-char (point-max))
+          (insert (usr--vocale-squelette audio duree))
+          (save-excursion
+            (save-restriction
+              (widen)
+              (usr--vocale-inserer (or texte "(transcription indisponible)") 'note nil)))
+          (save-buffer)
+          (setq usr--boite-reussites (1+ usr--boite-reussites)))
+      (when (buffer-live-p apercu) (kill-buffer apercu)))))
+
+(defun usr--vocale-titre-suggere (texte)
+  "Propose un titre à partir des premiers mots de TEXTE."
+  (when texte
+    (let ((extrait (string-trim (replace-regexp-in-string "[ \t\n]+" " " texte))))
+      (if (> (length extrait) 60) (substring extrait 0 60) extrait))))
 
 ;;; RACCOURCIS ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 ;;
@@ -2462,6 +3299,16 @@ insérée au point plutôt qu'affichée."
   "Capture un rendez-vous."
   (interactive)
   (org-capture nil "r"))
+
+(defun usr-note-vocale-denote ()
+  "Enregistre une note vocale et en fait une note Denote."
+  (interactive)
+  (org-capture nil "v"))
+
+(defun usr-note-vocale-breve ()
+  "Enregistre une note vocale brève dans le fichier de notes."
+  (interactive)
+  (org-capture nil "V"))
 
 (defun usr-facturation-devis ()
   "Crée un devis à partir du modèle LaTeX de l'association."
@@ -2609,7 +3456,9 @@ insérée au point plutôt qu'affichée."
     ("c" "capture…"            org-capture)
     ("t" "nouvelle tâche"      usr-tache-todo)
     ("n" "action suivante"     usr-tache-suivante)
-    ("r" "rendez-vous"         usr-rendez-vous)]
+    ("r" "rendez-vous"         usr-rendez-vous)
+    ("v" "note vocale"         usr-note-vocale-denote)
+    ("V" "note vocale brève"   usr-note-vocale-breve)]
    ["Dates"
     ("k" "calendrier"          calendar)
     ("l" "insérer un lien"     org-store-link)]])
@@ -2671,7 +3520,12 @@ insérée au point plutôt qu'affichée."
     ("k" "modifier les mots-clés" denote-rename-file-keywords)]
    ["Approfondir"
     ("x" "explorer la base…"    usr-menu-notes-explorer)
-    ("B" "bibliographie…"       usr-menu-notes-biblio)]])
+    ("B" "bibliographie…"       usr-menu-notes-biblio)]
+   ["Vocal"
+    ("v" "enregistrer / arrêter"   usr-note-vocale)
+    ("t" "transcrire un fichier…"  usr-transcrire-fichier)
+    ("I" "traiter la boîte vocale" usr-boite-vocale-traiter)
+    ("m" usr-transcription-basculer :description usr--vocale-desc-moteur)]])
 
 (transient-define-prefix usr-menu-ecriture ()
   "Écriture, relecture et export."
@@ -2877,7 +3731,8 @@ Une touche absente du clavier est simplement ignorée."
     ;; La touche « sans-fil » rafraîchit les témoins réseau de la modeline
     ;; plutôt que de couper la radio : c'est l'usage réellement utile ici.
     ("<XF86WLAN>"              . usr-etat-actualiser)
-    ;; La touche « micro » démarre et arrête une note vocale.
+    ;; La touche « micro » démarre l'enregistrement ; une seconde pression
+    ;; l'arrête et propose de le rattacher à une note.
     ("<XF86AudioMicMute>"      . usr-note-vocale))
   "Touches globales déclarées, sous forme (TOUCHE . COMMANDE).
 Sert aussi de source à `usr-touches-materielles'.")
@@ -3055,6 +3910,7 @@ diverger de ce que les touches font réellement."
                 "  | s-<flèches>          | déplacement entre fenêtres       |\n"
                 "  | s-<tab>              | plein écran                      |\n"
                 "  | XF86Audio*           | volume, lecture                  |\n"
+                "  | XF86AudioMicMute     | note vocale (marche / arrêt)     |\n"
                 "  | XF86MonBrightness*   | luminosité                       |\n"
                 "  | C-;                  | corriger le mot précédent        |\n"
                 "  | C-x b / C-x m        | tampon / nouveau courriel        |\n"
