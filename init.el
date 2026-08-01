@@ -851,6 +851,24 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
           ("CANCELLED" . (:foreground "grey"     :weight bold :strike-through t)))))
 
 ;;;; MODELINE
+
+;; `usr-appliquer-faces' peint la modeline inactive fond sur fond : tout doit y
+;; être invisible.  Un texte portant une face explicite perce ce camouflage et
+;; se met à flotter dans les fenêtres non sélectionnées.  D'où cet utilitaire :
+;; les couleurs ne sont posées que dans la fenêtre effectivement sélectionnée.
+;;
+;; Il impose un `:eval' — seul moyen d'obtenir une évaluation par fenêtre, un
+;; élément de `global-mode-string' étant sinon rendu une fois pour toutes.
+(defun usr--modeline-neutraliser (chaine)
+  "Renvoie CHAINE avec ses couleurs dans la fenêtre sélectionnée, sans elles ailleurs."
+  (cond
+   ((or (null chaine) (equal chaine "")) "")
+   ((and (fboundp 'mode-line-window-selected-p) (mode-line-window-selected-p))
+    chaine)
+   (t (let ((neutre (copy-sequence chaine)))
+        (remove-list-of-text-properties 0 (length neutre) '(face font-lock-face) neutre)
+        neutre))))
+
 (dolist (buf-name '(" *Echo Area 0*" " *Echo Area 1*"))
   (with-current-buffer (get-buffer-create buf-name)
     ;; 1. On efface tout redimensionnement précédent
@@ -870,7 +888,16 @@ Rejouée à chaque activation de thème via `enable-theme-functions'."
   :ensure nil
   :config
   (setq battery-mode-line-format "[%b%p%%] ")
-  (display-battery-mode 1))
+  (display-battery-mode 1)
+  ;; battery.el colore lui-même sa chaîne en charge basse ou critique, ce qui
+  ;; ferait réapparaître du rouge dans les modelines inactives.  On intercepte
+  ;; l'entrée que le mode vient d'ajouter.
+  (setq global-mode-string
+        (mapcar (lambda (element)
+                  (if (eq element 'battery-mode-line-string)
+                      '(:eval (usr--modeline-neutraliser battery-mode-line-string))
+                    element))
+                global-mode-string)))
 
 ;; Position compacte avec pied-de-mouche
 (setq-default mode-line-position '("%p¶%l"))
@@ -2431,6 +2458,12 @@ format Denote et déplacé dans le Bureau ; rien ne subsiste ici.")
 (defvar usr-vocale-marqueur-attente "(transcription en cours…)"
   "Texte déposé sous « * Transcription » tant que le résultat n'est pas là.")
 
+(defvar usr-vocale-diode "/sys/class/leds/platform::micmute/brightness"
+  "Fichier de la diode du micro, ou nil pour ne pas la piloter.
+Sur ThinkPad, cette diode est normalement asservie au noyau par son trigger
+`audio-micmute' ; la règle udev de config.scm la détache et en ouvre
+l'écriture au groupe « input ».")
+
 (defvar usr-transcription-moteur 'local
   "Moteur de transcription : `local' (whisper.cpp) ou `api' (OpenAI).")
 
@@ -2465,9 +2498,14 @@ format Denote et déplacé dans le Bureau ; rien ne subsiste ici.")
 (defvar usr--vocale-lien-courant nil
   "Lien Org du dernier audio déposé, lu par le modèle de capture « V ».")
 
-(defvar usr--vocale-temoin "")
-;; Sans cette propriété, la modeline dépouille la chaîne de ses faces : le
-;; témoin d'enregistrement resterait gris au lieu de rouge.
+(defvar usr--vocale-temoin-brut ""
+  "Témoin d'enregistrement, avec ses faces.")
+
+;; La propriété reste nécessaire — c'est elle qui autorise le traitement du
+;; `:eval' — mais elle ne fait plus fuiter les couleurs : la décision de farder
+;; est désormais prise à chaque rendu, fenêtre par fenêtre.
+(defvar usr--vocale-temoin '(:eval (usr--modeline-neutraliser usr--vocale-temoin-brut))
+  "Entrée de `global-mode-string' pour la note vocale.")
 (put 'usr--vocale-temoin 'risky-local-variable t)
 
 (or global-mode-string (setq global-mode-string '("")))
@@ -2476,7 +2514,7 @@ format Denote et déplacé dans le Bureau ; rien ne subsiste ici.")
 
 (defun usr--vocale-temoin-poser (texte &optional face)
   "Affiche TEXTE dans la modeline, ou l'efface lorsque TEXTE vaut nil."
-  (setq usr--vocale-temoin
+  (setq usr--vocale-temoin-brut
         (if texte
             (propertize (format " %s " texte) 'face (or face 'mode-line-emphasis))
           ""))
@@ -2500,7 +2538,9 @@ format Denote et déplacé dans le Bureau ; rien ne subsiste ici.")
    (format "● REC %s"
            (usr--vocale-duree-texte
             (float-time (time-subtract (current-time) usr--vocale-debut))))
-   '(:foreground "red" :weight bold)))
+   ;; Face sémantique plutôt qu'un « red » littéral : elle suit la bascule
+   ;; entre modus-operandi et modus-vivendi.
+   '(:inherit error :weight bold)))
 
 (defun usr--vocale-tache-debut ()
   (setq usr--vocale-taches (1+ usr--vocale-taches))
@@ -2511,6 +2551,19 @@ format Denote et déplacé dans le Bureau ; rien ne subsiste ici.")
   (unless (usr--vocale-en-cours-p) (usr--vocale-temoin-taches)))
 
 ;;;; --- Enregistrement -------------------------------------------------------
+
+(defun usr--vocale-diode (allumee)
+  "Allume ou éteint la diode du micro selon ALLUMEE.
+Sans permission d'écriture — règle udev absente, ou machine sans cette diode —
+ne fait rien et ne signale rien : la note vocale ne doit jamais dépendre d'un
+détail de matériel."
+  (when (and usr-vocale-diode (file-writable-p usr-vocale-diode))
+    (ignore-errors
+      (let ((coding-system-for-write 'no-conversion))
+        (write-region (if allumee "1\n" "0\n") nil usr-vocale-diode nil 'silence)))))
+
+;; Une sortie brutale en cours d'enregistrement laisserait la diode allumée.
+(add-hook 'kill-emacs-hook (lambda () (usr--vocale-diode nil)))
 
 (defun usr--vocale-demarrer (&optional suite)
   "Lance arecord.  SUITE, si elle est fournie, est appelée sans argument à
@@ -2536,6 +2589,7 @@ l'arrêt, à la place du menu de destination."
          :sentinel #'usr--vocale-sentinelle))
   (when usr--vocale-minuteur (cancel-timer usr--vocale-minuteur))
   (setq usr--vocale-minuteur (run-with-timer 0 1 #'usr--vocale-temoin-rafraichir))
+  (usr--vocale-diode t)
   (message "Enregistrement en cours — même touche pour arrêter."))
 
 (defun usr--vocale-arreter ()
@@ -2550,6 +2604,7 @@ l'arrêt, à la place du menu de destination."
       (cancel-timer usr--vocale-minuteur)
       (setq usr--vocale-minuteur nil))
     (setq usr--vocale-processus nil)
+    (usr--vocale-diode nil)
     (usr--vocale-temoin-taches)
     (let ((fichier usr--vocale-fichier)
           (suite usr--vocale-suite))
@@ -2971,7 +3026,7 @@ fichier temporaire, que l'appelant se charge de supprimer."
     (usr--vocale-demarrer #'ignore)
     (unwind-protect
         (read-event (propertize " ● Enregistrement — une touche pour arrêter… "
-                                'face '(:foreground "red" :weight bold)))
+                                'face '(:inherit error :weight bold)))
       (usr--vocale-arreter))
     (usr--vocale-attendre-fichier))))
 
