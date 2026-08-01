@@ -23,6 +23,7 @@
          "ghostscript" "mupdf" "poppler" "imagemagick"
          "djvulibre" "zip" "unzip" "pandoc" "fgallery"
          "vorbis-tools" "mpg321" "mpv" "alsa-utils"
+	 "ffmpeg" "whisper-cpp"
 	 "hunspell" "hunspell-dict-fr-toutesvariantes"
          "font-dejavu" "font-gnu-unifont" "libreoffice"
 	 "ledger" "graphviz"
