@@ -2858,6 +2858,10 @@ Une touche absente du clavier est simplement ignorée."
 (defvar usr--touches-declarees
   '(;; --- La porte d'entrée unique ---
     ("s-SPC"     . usr-menu-ouvrir)
+    ;; ... et la porte de sortie : s-g vaut C-g. Déclarée ici pour que le
+    ;; serveur X la remonte à Emacs depuis une fenêtre X11 ; c'est la
+    ;; traduction posée plus bas qui lui donne son comportement exact.
+    ("s-g"       . keyboard-quit)
 
     ;; --- Gestes réflexes ---
     ("s-<left>"   . windmove-left)
@@ -2911,6 +2915,13 @@ Sert aussi de source à `usr-touches-materielles'.")
     (when (string-prefix-p "s-" (car paire))
       (ignore-errors
         (keymap-set exwm-mode-map (car paire) (cdr paire))))))
+
+;; s-g ne se contente pas d'appeler `keyboard-quit' : il est traduit en C-g
+;; avant toute consultation des tables. C'est nécessaire là où C-g est capté
+;; par une table prioritaire plutôt que par la table globale — le menu
+;; transient (`transient-quit-one'), le minibuffer (`abort-minibuffers'),
+;; isearch — soit précisément les endroits d'où l'on veut ressortir.
+(define-key key-translation-map (kbd "s-g") (kbd "C-g"))
 
 (defun usr-touches-verifier ()
   "Vérifie que chaque touche déclarée est bien vue par Emacs et par EXWM.
@@ -3057,6 +3068,7 @@ diverger de ce que les touches font réellement."
                 "Une seule porte d'entrée : =s-SPC= (=C-c SPC= en secours).\n\n"
                 "* Touches directes\n\n"
                 "  | s-SPC                | le menu                          |\n"
+                "  | s-g                  | annuler (vaut C-g)               |\n"
                 "  | s-<flèches>          | déplacement entre fenêtres       |\n"
                 "  | s-<tab>              | plein écran                      |\n"
                 "  | XF86Audio*           | volume, lecture                  |\n"
