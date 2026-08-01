@@ -16,7 +16,7 @@
          "sshfs" "syncthing" "curl" "git" "xdg-utils"
 	 "desktop-file-utils" "ripgrep" "isync" "notmuch" "msmtp"
 	 "gnupg" "password-store" "pinentry-tty" "pinentry-emacs"
-	 "xrdb" "xauth" "dbus" "light" "hydroxide" "xdg-desktop-portal"
+	 "xrdb" "xauth" "setxkbmap" "dbus" "light" "hydroxide" "xdg-desktop-portal"
          "icecat" "yt-dlp"
 	 
          ;; --- Bureautique et Média ---
