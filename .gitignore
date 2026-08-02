@@ -1,0 +1,27 @@
+# État local d'Emacs — ne doit jamais être versionné.
+custom.el
+diary
+ebdb                    # contacts d'adhérents : données personnelles de tiers
+*-counter.el            # devis-counter.el, facture-counter.el, recu-counter.el
+backups/
+vocal/                  # enregistrements en cours et conversions
+server/
+eln-cache/
+elpa/
+transient/
+auto-save-list/
+url/
+.org-id-locations
+*~
+\#*\#
+.\#*
+
+# Identité de l'association : sortie du dépôt (voir DIAGNOSTIC.org, §Éthique).
+# Un lateci-identite.el.exemple aux valeurs fictives peut, lui, être versionné.
+lateci-identite.el
+
+# Sorties d'export
+*.pdf
+*.tex
+*.html
+*.epub

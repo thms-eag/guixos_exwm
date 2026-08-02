@@ -1,0 +1,520 @@
+#+TITLE: Diagnostic de la configuration guixos_exwm
+#+AUTHOR: LA TECI
+#+DATE: 2026-08-02
+#+OPTIONS: toc:2 num:t
+#+LATEX_CLASS: article
+#+LATEX_CLASS_OPTIONS: [11pt, a4paper]
+#+LATEX_HEADER: \usepackage[margin=2cm]{geometry}
+
+État analysé : branche =master=, commit =a9d4c99=.  Les numéros de ligne
+renvoient à cet état ; ils se décalent dès la première correction.
+
+Périmètre : les cinq fichiers du dépôt — =channels.scm=, =config.scm=,
+=home.scm=, =early-init.el=, =init.el= (3 988 lignes).
+
+Note de lecture : ce document est versionné dans un dépôt public.  Il désigne
+donc les données sensibles par leur *emplacement* et jamais par leur valeur.
+
+* Ce qui est réussi
+
+Plusieurs choix sont meilleurs que la moyenne des configurations publiées, et
+méritent d'être préservés tels quels lors des corrections qui suivent.
+
+- *Le raisonnement est écrit.*  Les commentaires expliquent le /pourquoi/ et non
+  le /quoi/ : SIGINT plutôt que SIGKILL pour qu'=arecord= puisse réécrire
+  l'en-tête WAV ; =-H @-= pour que la clé API ne transite pas par =argv= ;
+  =find-file-noselect= pour ne pas voler le focus ; « on ne dialogue jamais
+  depuis une sentinelle ».  C'est de la documentation de conception.
+
+- *Une seule porte d'entrée clavier* (=s-SPC=), avec une porte de secours
+  (=C-c SPC=), une carte auto-générée depuis =transient--layout=
+  (=usr-carte-raccourcis= — elle ne peut pas diverger du réel) et un
+  vérificateur de captures X11 (=usr-touches-verifier=).
+
+- *Trappes de diagnostic* : =LATECI_NO_EXWM= pour démarrer sans gestionnaire de
+  fenêtres, =LATECI_STATS= pour les statistiques =use-package=.
+
+- *Sondes système sans processus* : =/proc/net/route= et =/proc/mounts= lus en
+  Lisp pur plutôt qu'en lançant =ip route= ou =mount=.
+
+- *Chaîne vocale sérieuse* : asynchrone, jamais bloquante, avec repli
+  (=usr--vocale-secours=) pour qu'une transcription ne soit jamais perdue en
+  silence, ré-essais bornés, et l'audio déplacé /en dernier/ pour qu'un échec le
+  laisse intact dans la boîte de dépôt.
+
+- *=sudoers= réellement restreint* : =NOPASSWD= sur trois commandes /avec leurs
+  arguments/ (=tee /sys/power/state= et non =tee= tout court).  L'erreur
+  classique est évitée.
+
+- *Secrets hors dépôt* : les clés d'API passent par =pass=, jamais en dur.
+
+* Structure
+
+=init.el= fait 3 988 lignes (160 Ko) : environ 500 de modèles LaTeX enchâssés
+dans des chaînes, 900 pour la note vocale, 500 de menus transient.
+
+Absents du dépôt : =README=, =.gitignore=, licence, =Makefile=, script
+d'installation.  Rien n'indique où chaque fichier doit atterrir
+(=/etc/config.scm= ? =~/.config/guix/home.scm= ? =~/.emacs.d/init.el= ?).
+Tous les messages de commit sont =Last Sync: <date> (Mobile)= : l'historique ne
+porte aucune information exploitable.
+
+** Duplication mesurable
+
+- Les trois compteurs (=usr--get-next-devis-num=, =-facture-=, =-recu-=) sont
+  identiques à un symbole près : 42 lignes qui en valent 14.
+- Les trois modèles LaTeX partagent environ 95 % de leur contenu (en-tête, pied,
+  coordonnées bancaires, mentions légales) : environ 350 lignes qui en valent
+  120.
+- Le bloc =(or global-mode-string (setq …))= suivi de
+  =(unless (memq …) (append …))= est recopié trois fois, à 900 lignes d'écart
+  (l. 918, 1038, 2518).
+
+** Ce qui manque
+
+- =.gitignore=.  Si =user-emacs-directory= est le dépôt lui-même, alors
+  =devis-counter.el=, =facture-counter.el=, =custom.el=, =diary=, =ebdb=,
+  =backups/=, =vocal/= et =server/= sont candidats au commit accidentel.
+  =ebdb= contient des données personnelles de tiers.
+- =README.org= : où va quoi, quelle commande reconstruit quoi, quelles variables
+  d'environnement existent, et surtout quel état n'est /pas/ dans le dépôt.
+- Un découpage en modules (=lisp/usr-vocal.el=, =usr-ia.el=, =usr-compta.el=,
+  =usr-menus.el=, =usr-modeline.el=) chargés depuis =init.el=.  Outre la
+  relisibilité, un module qui échoue au chargement ne tue plus toute la session.
+
+* Architecture
+
+** L'ordre de chargement est le point faible central
+
+=(exwm-wm-mode)= est appelé ligne 1129 — à 28 % du fichier.  Les raccourcis
+clavier sont posés ligne 3800.  Entre les deux : gptel, la comptabilité, 900
+lignes de note vocale, les menus.
+
+*Toute erreur Lisp dans cet intervalle laisse un gestionnaire de fenêtres
+démarré, sans aucun raccourci, sans =s-SPC=* — donc une session dont on ne peut
+plus rien faire au clavier.  La trappe =LATECI_NO_EXWM= n'aide qu'au prochain
+démarrage, à condition de pouvoir encore atteindre un TTY.
+
+Correctif : poser les raccourcis avant =exwm-wm-mode=, ou déplacer
+=exwm-wm-mode= vers =emacs-startup-hook=, ou envelopper les sections
+intermédiaires dans =condition-case=.
+
+** Politique de robustesse incohérente
+
+=ews.el= absent produit un =display-warning= et la session continue (l. 51).
+=emacs-exwm= absent fait échouer =(require 'exwm)= nu ligne 1005, et tout
+s'arrête.  Le composant /critique/ est moins protégé que l'optionnel.
+
+** Emacs est PID 1 de la session
+
+=.xinitrc= se termine par =exec dbus-run-session emacs=, sans repli.  Emacs
+meurt, X meurt, tout meurt.  Un =|| exec xterm= en fin de =.xinitrc= transforme
+un plantage total en « je répare depuis un xterm ».
+
+** Ce qui n'est pas déclaratif
+
+C'est le manque structurant.  Le dépôt reproduit le /système/ et les /paquets/,
+mais pas la /configuration des services/ :
+
+- dossiers et identifiants d'appareils Syncthing ;
+- =.mbsyncrc=, =.msmtprc=, configuration notmuch ;
+- flux elfeed, base ebdb ;
+- =~/.authinfo=, =~/.ssh/authorized_keys= ;
+- =~/.ssh/id_ed25519_club1=, pourtant référencé par le service shepherd de
+  =home.scm= ;
+- =~/.config/hydroxide=.
+
+Réinstaller depuis ce dépôt donne une machine qui démarre et /ressemble/ à
+l'originale, mais sans courriel, sans synchronisation, sans flux.  La promesse
+« mon OS est du code » n'est tenue qu'à moitié.
+
+** Le pin de canal est décoratif
+
+=channels.scm= fige un commit précis.  Mais =usr-guix-mettre-a-jour= lance
+=guix pull= nu, qui lit =~/.config/guix/channels.scm= et /dépasse/ le pin sans
+jamais le réécrire.  Le commit figé dans le dépôt devient faux dès le premier
+=guix pull=, et rien ne le signale.
+
+Correctif : après =guix pull=, exécuter =guix describe -f channels > channels.scm=
+puis committer.  Alors seulement le pin dit la vérité.
+
+** Dépendances implicites par propagation
+
+=denote=, =consult= et =citar= sont utilisés dans =init.el= mais absents de
+=home.scm= : ils n'arrivent que comme entrées propagées de
+=emacs-denote-journal=, =emacs-consult-notes= et =emacs-citar-denote=.  Cela
+fonctionne aujourd'hui ; un changement d'empaquetage en amont casserait le
+bureau sans que rien dans la configuration n'ait bougé.
+
+* Logique — défauts concrets
+
+Classés du plus au moins gênant au quotidien.
+
+| #   | Emplacement            | Défaut                                                                                                                                                                                                                       |
+|-----+------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| L1  | =init.el:1844= / =1831= | =usr-navigateur= cherche le tampon « Icecat », le renommage produit « IceCat » (C majuscule).  Le tampon n'est jamais trouvé : *un nouveau processus IceCat est lancé à chaque appel*.                                          |
+| L2  | =init.el:1053=          | =usr--volume-string= vaut « [45%] » dans =global-mode-string= : =%]= est une %-construction de mode-line.  *Le volume s'affiche « [45 ».*  C'est le bug que le commentaire l. 878-885 décrit et corrige pour la batterie ; la solution existe déjà dans le fichier mais n'a pas été appliquée ici. |
+| L3  | =init.el:1090=, =1096=  | =(save-some-buffers)= sans =t= *interroge* pour chaque tampon, alors que le commentaire annonce une sauvegarde silencieuse.  À l'extinction, on récolte une file de questions.  → =(save-some-buffers t)=.                     |
+| L4  | =init.el:1972=, =2001=, =2019= | =usr-ia-corriger=, =usr-ia-diagnostiquer= et =usr-ia-recherche-web= n'ont pas de =(require 'gptel)= alors que =use-package gptel= est =:defer t= → =void-function= / =void-variable= au premier appel.  Les commandes voisines le font correctement (l. 2264). |
+| L5  | =init.el:1887=          | Le jeton Syncthing est calculé dans =:custom=, *qui n'est pas différé* par =use-package= : =pass show= s'exécute à chaque démarrage d'Emacs, donc pendant l'initialisation d'EXWM, donc réclame GPG avant que le WM soit debout.  → déplacer dans =:config=. |
+| L6  | =init.el:2312=          | =usr-ia-dialogue= s'auto-rappelle par =call-interactively= *depuis le callback* : les trames s'empilent à chaque tour, et le =y-or-n-p= s'exécute en contexte de sentinelle — précisément ce que le commentaire l. 2627-2629 interdit dans la chaîne vocale. |
+| L7  | =init.el:286=           | Le =#+TBLFM= du DEVIS code en dur la ligne 3 (=@3$4=).  Ajouter une deuxième prestation casse le total.  La FACTURE et le REÇU utilisent la forme correcte (=@>$4=vsum(@I..@II)=) ; uniformiser dessus.                        |
+| L8  | =home.scm:133=          | ~Exec=/bin/true~ — *Guix ne fournit que =/bin/sh= et =/usr/bin/env=*.  De plus le fichier =org.gnu.Emacs.FileChooser.service= déclare ~Name=org.freedesktop.impl.portal.desktop.emacs~ alors que D-Bus exige la coïncidence des deux.  Code mort trompeur (sans effet visible tant qu'Emacs enregistre le nom lui-même via =filechooser-start=). |
+| L9  | =home.scm:88=, =98=     | =#:log-file= pointe vers =~/.local/var/log/= : shepherd crée le /fichier/, pas le /répertoire/.  Si celui-ci n'existe pas, les services =sshfs-club1= et =hydroxide= échouent au démarrage.                                    |
+| L10 | =home.scm:89=           | Le =stop= du service sshfs est un =make-kill-destructor=.  Tuer =sshfs -f= laisse un point de montage éventé (« Transport endpoint is not connected ») ; il faut =fusermount -u=.  Par ailleurs =~/Club1= n'est créé nulle part. |
+| L11 | =home.scm:91-99=        | =hydroxide= n'a pas d'=auto-start? #f= (contrairement à sshfs) : il démarre à l'ouverture de session.  S'il n'est pas authentifié, shepherd le relance en boucle.                                                              |
+| L12 | =init.el:2571=          | =(add-hook 'kill-emacs-hook (lambda () …))= : lambda anonyme, donc =usr-configuration-recharger= en ajoute une copie à chaque rechargement.  Le rechargement rejoue aussi =pinentry-start=, =filechooser-start= et =exwm-wm-mode=, non idempotents.  *La commande « recharger la configuration » du menu n'est pas sûre.* |
+| L13 | =init.el:694=           | =usr--garder-un-tampon= parcourt toute la =buffer-list= à *chaque* fermeture de tampon, y compris les tampons temporaires internes, et peut faire un =switch-to-buffer= au milieu d'une opération en lot.                       |
+| L14 | =init.el:973-993=       | =usr--verifier-systeme= effectue *deux parcours complets de =/proc=* par minute (un pour syncthing, un pour hydroxide).  Un seul suffit pour les deux.                                                                          |
+| L15 | =init.el:3751=          | =setxkbmap -option caps:super= au chargement : dépendance d'exécution pour quelque chose de déclarable.  =Option "XkbOptions" "caps:super"= dans l'=InputClass= clavier de =config.scm= le rend permanent.                      |
+| L16 | =init.el:1970=          | =usr-ia-modele-rapide= défini, jamais utilisé.  =emacs-org-caldav= installé dans =home.scm=, jamais configuré.                                                                                                                 |
+
+* Éthique
+
+C'est la section la plus sérieuse, parce qu'elle engage des tiers.
+
+** Données personnelles publiées
+
+*Le dépôt est public.*  =init.el= publie en clair, répétés dans les trois
+modèles de capture :
+
+- l'IBAN et le BIC de l'association (l. 319 et 442) ;
+- le SIRET, le code APE et la dénomination complète ;
+- l'adresse postale du siège ;
+- un numéro de téléphone personnel (l. 1794) ;
+- huit adresses de courriel, dont des listes de diffusion *d'autres
+  associations* — ce sont les coordonnées de structures tierces.
+
+Un IBAN n'est pas un secret : il figure sur chaque facture.  Mais IBAN, SIRET,
+adresse, téléphone et nom du trésorier agrégés et indexés par les moteurs de
+recherche constituent le nécessaire de l'arnaque au faux fournisseur — dont le
+coût retomberait sur l'association.
+
+Ces données sont dans l'historique git depuis le premier commit : retirer le
+fichier ne suffit pas.
+
+*Correctif.*  Sortir ce bloc dans un =~/.emacs.d/lateci-identite.el= non
+versionné, chargé avec =:no-error-if-file-is-missing= (même idiome que
+=custom-file=, l. 1623).  Ne garder dans le dépôt qu'un
+=lateci-identite.el.exemple= aux valeurs fictives.  Puis réécrire l'historique
+(=git filter-repo=) ou repartir d'un dépôt neuf, en passant le dépôt en privé le
+temps de l'opération.
+
+** Frontière absente entre les notes locales et les LLM tiers
+
+=usr--ia-outil-lire= construit son chemin ainsi :
+
+#+begin_src emacs-lisp
+(let ((chemin (expand-file-name nom_fichier "~/Bureau/")))
+  (if (file-exists-p chemin) …))
+#+end_src
+
+=nom_fichier= vient du modèle.  Un chemin relatif remontant hors du Bureau est
+résolu sans obstacle : *c'est une primitive de lecture de fichier arbitraire
+pilotée par un LLM* — =~/.authinfo=, les clés SSH, =~/.gnupg/=.
+
+=gptel-confirm-tool-calls t= est bien positionné et constitue le garde-fou réel,
+mais il repose sur la vigilance humaine à chaque appel.
+
+*Correctif* (trois lignes) : vérifier que =(file-truename chemin)= reste sous
+=(file-truename "~/Bureau/")= et que l'extension est =.org=.
+
+Par ailleurs, =usr-ia-diagnostiquer= envoie 6 000 caractères du tampon courant
+*sans confirmation* : si ce tampon est un courriel d'adhérent ou une note de
+réunion, c'est une exfiltration non relue.  =usr-ia-corriger= envoie la région
+en silence.  Le backend par défaut est OpenAI.
+
+** RGPD
+
+L'association est responsable de traitement : la machine héberge la base ebdb
+(contacts d'adhérents), l'archive notmuch de trois listes de diffusion, une
+comptabilité nominative, et des notes vocales pouvant contenir la voix de tiers
+n'ayant rien consenti.
+
+Trois mesures techniques de base manquent :
+
+1. chiffrement au repos (voir /Robustesse/) ;
+2. minimisation de la durée : =default-cache-ttl 43200= laisse la clé GPG
+   déverrouillée douze heures ;
+3. frontière de transfert vers des sous-traitants hors UE (section précédente).
+
+Le défaut =usr-transcription-moteur 'local= est le bon choix ;
+=usr-transcription-basculer= le renverse vers OpenAI sans le moindre
+avertissement.
+
+** Cohérence logicielle
+
+Le reste de la pile est irréprochable de ce point de vue : Guix, linux-libre,
+IceCat, EXWM, et une signature de courriel qui revendique la sobriété numérique.
+Deux entorses :
+
+- le backend d'IA par défaut est propriétaire et américain ;
+- =usr-vocale-installer-modele= télécharge 1,5 Go de poids depuis HuggingFace
+  *sans aucune vérification d'intégrité* — ni sha256, ni signature.  Un binaire
+  non authentifié récupéré sur le réseau, dans un système qui existe précisément
+  pour garantir le contraire.  Le correctif minimal est un contrôle sha256 après
+  téléchargement.
+
+** Le « mode kiosque » n'en est pas un
+
+=usr-kiosque-activer= lance =icecat --kiosk=.  Sous EXWM, =s-SPC=, =C-g= et le
+changement de tampon restent disponibles : ce n'est pas une frontière de
+sécurité, c'est un plein écran.  Utilisé pour du public lors d'un événement
+associatif, la machine entière — courriels, comptabilité, clés — est à un
+raccourci de distance.
+
+Soit le renommer (« présentation »), soit le durcir : utilisateur dédié et
+session X séparée.
+
+* Robustesse
+
+** Aucun chiffrement du disque
+
+=config.scm= n'a pas de =mapped-devices= : pas de LUKS.  La machine porte la
+comptabilité de l'association, les contacts d'adhérents, l'archive courriel, les
+clés GPG et SSH.  Perdue ou volée, tout est lisible en montant le disque sur une
+autre machine.  =slock= ne protège qu'un écran allumé.
+
+C'est le manque le plus grave du diagnostic, à égalité avec le suivant.
+
+** Aucune sauvegarde
+
+Syncthing n'est pas une sauvegarde : il propage les suppressions et les
+corruptions.  Aucun =borg= ni =restic= dans =home.scm=, aucun job mcron de
+sauvegarde — le seul job existant est =mbsync=.
+
+Un =rm= malheureux dans =~/Bureau/compta/= et l'exercice comptable disparaît des
+deux côtés de la synchronisation.
+
+*Correctif* : =borg= plus un job mcron quotidien vers Club1 — le montage sshfs
+existe déjà — avec dépôt chiffré.
+
+** Aucun pare-feu
+
+Pas de =nftables-service-type=.  Sur un portable qui se déplace tournent =sshd=
+(authentification par clé seule, correct), Syncthing (=0.0.0.0:22000=) et
+hydroxide.  Rien ne filtre.  Une politique =input drop= plus
+=établi/apparenté= plus loopback tient en une vingtaine de lignes.
+
+** Réseau sans fil non pris en charge
+
+/Confirmé : canal officiel seul./  Deux causes se cumulent.
+
+D'abord la couche logicielle : seul =dhcpcd-service-type= est déclaré.  Ni
+=wpa-supplicant=, ni NetworkManager, ni connman, et aucun de ces paquets dans
+=home.scm=.  =dhcpcd= seul obtient un bail DHCP mais ne s'associe pas à un
+réseau WPA : rien ne permet de saisir une clé de réseau.
+
+Ensuite le micrologiciel : =channels.scm= ne contient que le canal Guix
+officiel, donc noyau linux-libre, donc pas de firmware Intel ou Realtek.  Sur un
+portable de type ThinkPad — ce que suggère la diode =platform::micmute= de
+=config.scm= — la carte Wi-Fi n'est même pas détectée.
+
+*Conclusion : la machine est en Ethernet seul.*  Ce n'est pas un défaut, c'est
+un choix cohérent avec le reste.  Mais il n'est écrit nulle part, et deux
+éléments de l'interface le contredisent : le témoin =net= de la modeline et la
+touche =XF86WLAN= liée à =usr-etat-actualiser= laissent croire à une gestion du
+sans-fil qui n'existe pas.
+
+Point positif : =channels.scm= décrit donc bien le système qui tourne.  La
+reproductibilité n'est pas rompue à la racine ; le seul problème du pin reste
+celui décrit plus haut, mécanique et corrigible.
+
+Pistes, par ordre de coût croissant :
+
+1. ne rien changer, mais l'écrire dans le =README= — et retirer ou réaffecter la
+   touche =XF86WLAN=, qui promet ce qu'elle ne fait pas ;
+2. partage de connexion USB depuis le téléphone : fonctionne sous linux-libre
+   sans firmware, et couvre la mobilité sans rien concéder ;
+3. adaptateur Wi-Fi USB à puce libre (Atheros =ath9k_htc=), pris en charge par
+   linux-libre, avec =wpa-supplicant= et son service ;
+4. passer par =nonguix= — ce qui ferait sortir la machine de la garantie « tout
+   libre » que le reste de la configuration tient scrupuleusement.
+
+** Pas de =%desktop-services=, et ses conséquences
+
+Le choix =%base-services= plus services sélectionnés est défendable et sobre,
+mais il faut en mesurer le prix :
+
+- pas d'elogind : *fermer le capot ne suspend pas* (TLP est installé, mais rien
+  ne câble l'événement) ;
+- pas d'udisks : *pas de montage automatique de clé USB*, chaque clé demande un
+  =sudo mount= ;
+- pas de polkit, pas de gestion de sièges.
+
+** Pas de verrouillage automatique en cas d'inactivité
+
+=.local/bin/suspend= lance bien =slock= avant de suspendre — bon réflexe.  Mais
+rien ne verrouille après N minutes d'inactivité (=xautolock= ou =xidlehook=
+absents).  Une machine laissée ouverte reste ouverte.
+
+** Audio en ALSA brut
+
+Ni PipeWire ni PulseAudio.  Conséquences : =arecord -D default= pendant une
+lecture EMMS peut échouer selon la carte ; pas de volume par application ; pas
+d'audio Bluetooth ; pas de partage d'écran avec le son.  Et =amixer sset Master=
+échoue silencieusement sur les cartes qui n'exposent que =PCM= — la modeline
+affiche alors « [--%] » sans rien signaler.
+
+Choix cohérent avec la sobriété, mais à assumer explicitement.
+
+** Pas de multi-écran
+
+Ni =exwm-randr=, ni =xrandr=, ni =arandr= nulle part.  Brancher un
+vidéoprojecteur — pour une association qui fait des présentations — n'est pas
+prévu.
+
+** Aucun test, aucune intégration continue
+
+Rien ne vérifie que la configuration se construit avant de redémarrer dessus.
+Trois commandes suffiraient, en cible =make check= ou en CI :
+
+#+begin_src sh
+guix system build config.scm
+guix home build home.scm
+emacs --batch --eval '(check-parens)' init.el
+#+end_src
+
+C'est le meilleur rapport effort/risque de toute la liste : cela attrape les
+erreurs Scheme et les parenthèses avant qu'elles ne coûtent une session.
+
+** =texlive-geometry= probablement manquant
+
+Les trois modèles (devis, facture, reçu) font
+~\usepackage[margin=2cm]{geometry}~.  =home.scm= liste =texlive-scheme-basic= et
+une quinzaine de paquets nommés, mais pas =geometry=, qui relève de
+=collection-latexrecommended= et non de =basic=.
+
+À vérifier avant de conclure — mais si c'est confirmé, *aucune facture ne
+s'exporte en PDF*.  L'export de ce document même sert de test.
+
+** Disposition clavier sur le TTY
+
+=.bash_profile= demande la phrase de passe GPG sur =/dev/tty1=, avant X.  Il
+faut confirmer que la console utilise bien le clavier =fr= : le champ
+=keyboard-layout= d'=operating-system= sert au chargeur d'amorçage et à Xorg, la
+console est un chemin distinct.  Taper une phrase de passe en qwerty en croyant
+être en azerty coûte une heure de diagnostic.
+
+* Fonction — frictions du quotidien
+
+** Une seule identité d'expéditeur
+
+=user-mail-address= est fixé à une seule adresse et =notmuch-fcc-dirs= vaut une
+chaîne unique, alors que quatre boîtes sont suivies (TECI, Fight-Club, Hangar,
+personnelle).  Répondre depuis la bonne adresse est manuel, et *les courriels
+envoyés depuis l'identité personnelle sont classés dans le dossier Envoyés de
+Club1*.
+
+=notmuch-fcc-dirs= accepte une liste de couples =(motif . dossier)= : c'est le
+correctif direct.
+
+** =mbsync= échoue en silence
+
+Le job mcron s'exécute toutes les dix minutes, mais échoue tant que GPG est
+verrouillé — les mots de passe isync et msmtp viennent de =pass= — sans que rien
+ne le signale.  Il peut aussi entrer en concurrence avec
+=usr-courriel-synchroniser= lancé à la main.
+
+** Séparation visuelle nulle
+
+=mode-line-inactive= a son avant-plan /et/ son arrière-plan à la couleur du
+fond ; =set-fringe-mode 0= ; =vertical-border= et les trois =window-divider=
+sont fondus dans le fond.  À trois fenêtres ouvertes, rien ne dit où l'une
+finit.
+
+C'est un parti pris esthétique assumé, mais il a un coût de lisibilité.  Et
+=:height 120= en dur ignore la densité de l'écran.
+
+** Numérotation des factures non conforme
+
+=usr--get-next-facture-num= *incrémente et écrit le compteur avant* que le
+fichier existe : un =org-capture= abandonné par =C-c C-k= consomme un numéro et
+laisse un *trou dans la séquence*.  L'article 242 nonies A annexe II du CGI
+exige une numérotation chronologique et continue, sans rupture.
+
+*Correctif* : n'incrémenter qu'après écriture réussie du fichier, ou tenir un
+registre des numéros émis.
+
+Trois détails à corriger au passage :
+
+- le format =%02d= casse l'ordre au-delà de 99 ;
+- la citation exacte est « art. 293 B du CGI » ; le pied de page écrit « 293b » ;
+- pour une structure en franchise de TVA, libeller les colonnes « HT » est
+  trompeur : « net de taxe » est le terme juste.
+
+** Les tableaux ne se recalculent pas à l'export
+
+Un devis exporté sans =C-c C-c= préalable sur le tableau affiche des totaux à 0.
+
+** Réglages d'export LaTeX
+
+=org-latex-logfiles-extensions= contient ="tex"= : le =.tex= généré est supprimé
+après export, ce qui rend impossible tout diagnostic LaTeX.  Et =-shell-escape=
+n'est présent que sur les passes 2 et 3, pas sur la première, alors que le
+paquet =svg= en a besoin partout.
+
+À noter : =-shell-escape= est un vecteur d'exécution de code arbitraire si l'on
+exporte un document reçu d'un tiers.
+
+* Priorisation
+
+** P0 — cette semaine
+
+1. Sortir identité, IBAN et téléphone du dépôt ; réécrire l'historique ou
+   repartir d'un dépôt neuf ; passer le dépôt en privé entre-temps.
+2. Chiffrer le disque (LUKS).
+3. Mettre en place une sauvegarde réelle (borg vers Club1).
+4. Contenir =usr--ia-outil-lire= sous =~/Bureau/= avec extension =.org=.
+5. Ajouter un =.gitignore= /(fait avec ce document)/.
+
+** P1 — ce mois-ci
+
+6. Poser les raccourcis avant =exwm-wm-mode= ; ajouter =|| exec xterm= à
+   =.xinitrc=.
+7. Corriger L1 à L5.
+8. =nftables= minimal.
+9. Intégration continue : =guix system build=, =guix home build=,
+   =check-parens=.
+10. Rendre =channels.scm= auto-réécrit après =guix pull= ; documenter le choix
+    « Ethernet seul » et retirer la touche =XF86WLAN= trompeuse.
+11. Corriger la numérotation des factures.
+
+** P2 — quand le temps le permet
+
+12. Découper =init.el= en modules ; factoriser les trois compteurs et les trois
+    préambules LaTeX (environ 400 lignes en moins).
+13. Déclarer explicitement =denote=, =consult=, =citar=, =xmodmap= et
+    =texlive-geometry=.
+14. =README.org= ; =notmuch-fcc-dirs= multi-identités ; verrouillage
+    d'inactivité ; =exwm-randr=.
+
+* Procédure de vérification des correctifs
+
+À suivre le jour où les P1 sont appliqués, *sans jamais redémarrer sur une
+configuration non construite* :
+
+#+begin_src sh
+# 1. Parenthèses
+emacs --batch --eval '(check-parens)' init.el
+
+# 2. L'initialisation passe, sans gestionnaire de fenêtres
+LATECI_NO_EXWM=1 emacs --batch -l early-init.el -l init.el
+
+# 3. Les deux fichiers Scheme se construisent (sans rien reconfigurer)
+guix home build home.scm
+guix system build config.scm
+#+end_src
+
+Puis, en session graphique sous ~LATECI_NO_EXWM=1~ : vérifier =s-SPC=,
+=usr-touches-verifier= et =usr-carte-raccourcis=.
+
+Contrôles ponctuels :
+
+- L1 : lancer =usr-navigateur= deux fois, vérifier =pgrep -c icecat= = 1 ;
+- L2 : le volume affiche « [45%] » et non « [45 » ;
+- L7 : ajouter une deuxième ligne au tableau d'un devis, =C-c C-c=, vérifier le
+  total.
+
+Seulement ensuite : =guix home reconfigure home.scm=, puis redémarrer la
+session.
